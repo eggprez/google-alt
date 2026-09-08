@@ -21,4 +21,6 @@ export const config = {
     concurrency: int(env.OVERVIEW_CONCURRENCY, 2),
   },
   vncTarget: env.VNC_TARGET || 'http://127.0.0.1:6080',
+  // If set, every request must carry a matching X-Proxy-Secret header (set by your reverse proxy).
+  proxySecret: env.PROXY_SECRET || '',
 };

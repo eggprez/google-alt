@@ -1,13 +1,14 @@
 services:
   google-alt:
-    build: .
-    image: google-alt:latest
+    image: ghcr.io/eggprez/google-alt:latest
+    # To build locally instead of pulling: uncomment the next line and run `docker compose up -d --build`.
+    # build: .
     container_name: google-alt
     restart: unless-stopped
     env_file: .env
     ports:
-      # Only bind to loopback; nginx + TinyAuth sit in front.
-      - "127.0.0.1:8080:8080"
+      # Host port your reverse proxy forwards to. Bind to 127.0.0.1:2039:8080 if nginx runs on the same host.
+      - "2039:8080"
     volumes:
       - google-alt-data:/data
     shm_size: 1g

@@ -59,17 +59,28 @@ cp .env.example .env
 
 ### 3. Run
 
+Images are published to `ghcr.io/eggprez/google-alt` by GitHub Actions on every push to `main`.
+
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-The app listens on `127.0.0.1:8080`. Check `curl localhost:8080/healthz`.
+If the package is private, `docker login ghcr.io` on the server first with a GitHub token that has
+`read:packages`. To build locally instead, uncomment `build: .` in `docker-compose.yml` and run
+`docker compose up -d --build`.
 
-### 4. nginx + TinyAuth
+The app listens on host port `2039` (container port 8080). Check `curl localhost:2039/healthz`.
 
-Copy `deploy/nginx-search.bindel.glass.conf` into your nginx sites, fix the certificate paths and the
-TinyAuth upstream address, reload nginx. The config leaves `/opensearch.xml` and `/favicon.ico`
-unauthenticated so browsers can discover the engine; everything else requires your SSO session.
+### 4. Reverse proxy + TinyAuth
+
+**Nginx Proxy Manager:** create a proxy host for `search.bindel.glass` forwarding to the Docker host on
+port 2039, then paste `deploy/nginx-proxy-manager-advanced.conf` into the Advanced tab. Fix the TinyAuth
+address and set the `X-Proxy-Secret` value to match `PROXY_SECRET` in `.env`.
+
+**Plain nginx:** use `deploy/nginx-search.bindel.glass.conf` instead.
+
+With `PROXY_SECRET` set, the app returns 403 to any request that did not come through the proxy, so the
+exposed port 2039 can't be used to skip SSO from the LAN. `/healthz` is exempt for Docker's health check.
 
 ### 5. Sign into Google once
 
@@ -106,6 +117,7 @@ All settings are environment variables, documented in `.env.example`. The ones y
 | `CLAUDE_MODEL` | `sonnet` | Model for the overview. `opus` is slower and better. |
 | `OVERVIEW_CACHE_TTL_S` | `3600` | Reuse an overview for the same query. `0` disables. |
 | `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps per overview. |
+| `PROXY_SECRET` | empty | Require this value in an `X-Proxy-Secret` header on every request. |
 | `FORWARD_CLIENT_UA` | `true` | Ask Google for markup matching the requesting browser. |
 | `AIO_WAIT_MS` | `2500` | How long to wait for Google's overview to appear before serving. |
 

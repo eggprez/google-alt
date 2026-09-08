@@ -1,4 +1,5 @@
 import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { config } from './config.js';
 import { fetchGoogle, browserStatus, closeBrowser, getContext, PLACEHOLDER_ID } from './browser.js';
@@ -11,6 +12,20 @@ app.disable('x-powered-by');
 app.set('trust proxy', true);
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+// Optional shared secret so only traffic that came through the reverse proxy is served.
+function hasProxySecret(headers) {
+  if (!config.proxySecret) return true;
+  const given = headers['x-proxy-secret'];
+  if (typeof given !== 'string') return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(config.proxySecret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+app.use((req, res, next) => {
+  if (req.path === '/healthz' || hasProxySecret(req.headers)) return next();
+  res.status(403).type('text').send('Forbidden: missing or invalid X-Proxy-Secret');
+});
 
 // Params we forward to Google for a web search. Everything else is dropped.
 const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filter', 'nfpr', 'spell', 'udm', 'oq', 'as_q', 'as_epq', 'as_oq', 'as_eq', 'as_sitesearch', 'as_filetype', 'ie', 'oe'];
@@ -128,7 +143,10 @@ const server = app.listen(config.port, () => {
   log(`google-alt listening on :${config.port} as ${config.publicOrigin}`);
   getContext().then(() => log('browser ready')).catch((e) => log('browser failed to start', e));
 });
-server.on('upgrade', vncProxy.upgrade);
+server.on('upgrade', (req, socket, head) => {
+  if (!hasProxySecret(req.headers)) { socket.destroy(); return; }
+  vncProxy.upgrade(req, socket, head);
+});
 server.requestTimeout = 0;
 server.headersTimeout = 65000;
 
