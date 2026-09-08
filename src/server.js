@@ -128,12 +128,17 @@ app.get('/api/overview', async (req, res) => {
 
 // noVNC for the one-time Google login. Only reachable through this app (and your SSO in front of it).
 app.get('/vnc', (req, res) => res.redirect(302, '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'));
+// ws is deliberately false: with ws:true the library grabs the server's upgrade event itself after
+// the first request and ignores our handler below, which does the X-Proxy-Secret check.
 const vncProxy = createProxyMiddleware({
   pathFilter: '/vnc/',
   target: config.vncTarget,
   changeOrigin: true,
-  ws: true,
+  ws: false,
   pathRewrite: { '^/vnc/': '/' },
+  on: {
+    error: (err, req) => log('vnc proxy error', req?.url, err.message),
+  },
 });
 app.use(vncProxy);
 
@@ -144,7 +149,14 @@ const server = app.listen(config.port, () => {
   getContext().then(() => log('browser ready')).catch((e) => log('browser failed to start', e));
 });
 server.on('upgrade', (req, socket, head) => {
-  if (!hasProxySecret(req.headers)) { socket.destroy(); return; }
+  if (!req.url.startsWith('/vnc/')) { socket.destroy(); return; }
+  if (!hasProxySecret(req.headers)) {
+    log(`vnc websocket rejected: missing/invalid X-Proxy-Secret (from ${req.headers['x-forwarded-for'] || socket.remoteAddress})`);
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  log(`vnc websocket ${req.url}`);
   vncProxy.upgrade(req, socket, head);
 });
 server.requestTimeout = 0;
