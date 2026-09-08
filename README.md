@@ -85,7 +85,10 @@ address and set the `X-Proxy-Secret` value to match `PROXY_SECRET` in `.env`.
 **Plain nginx:** use `deploy/nginx-search.bindel.glass.conf` instead.
 
 With `PROXY_SECRET` set, the app returns 403 to any request that did not come through the proxy, so the
-exposed port 2039 can't be used to skip SSO from the LAN. `/healthz` is exempt for Docker's health check.
+exposed port 2039 can't be used to skip SSO from the LAN. Exempt: `/healthz` (Docker health check),
+`/opensearch.xml`, `/favicon.ico`, and noVNC's static files under `/vnc/` (the VNC websocket is still
+gated). The exemptions matter with NPM's "Cache Assets" option, which serves `*.js`/`*.css` through a
+location block without your custom headers.
 
 ### 5. Sign into Google once
 

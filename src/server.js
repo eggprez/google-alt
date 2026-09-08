@@ -22,8 +22,12 @@ function hasProxySecret(headers) {
   const b = Buffer.from(config.proxySecret);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+// Paths that don't need the secret: the health check, browser discovery files, and noVNC's static
+// assets. Reverse proxies with asset caching (e.g. NPM "Cache Assets") serve *.js/*.css through a
+// separate location that lacks custom headers. The websocket itself is still gated (see 'upgrade').
+const SECRET_EXEMPT = /^\/(healthz|opensearch\.xml|favicon\.ico|vnc\/(?!websockify).*)$/;
 app.use((req, res, next) => {
-  if (req.path === '/healthz' || hasProxySecret(req.headers)) return next();
+  if (SECRET_EXEMPT.test(req.path) || hasProxySecret(req.headers)) return next();
   res.status(403).type('text').send('Forbidden: missing or invalid X-Proxy-Secret');
 });
 
