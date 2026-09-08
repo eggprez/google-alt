@@ -1,0 +1,17 @@
+services:
+  google-alt:
+    build: .
+    image: google-alt:latest
+    container_name: google-alt
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Only bind to loopback; nginx + TinyAuth sit in front.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - google-alt-data:/data
+    shm_size: 1g
+    init: true
+
+volumes:
+  google-alt-data:

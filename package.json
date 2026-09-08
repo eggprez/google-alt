@@ -1,0 +1,21 @@
+{
+  "name": "google-alt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Google results proxy that replaces Google's AI Overview with a Claude Code overview",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "marked": "^15.0.12",
+    "playwright": "1.63.0",
+    "sanitize-html": "^2.17.0"
+  }
+}
