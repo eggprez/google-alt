@@ -20,7 +20,10 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
 .err{color:#b3261e}
 </style></head><body><main>${body}</main></body></html>`;
 
-export function homePage({ origin, status }) {
+export function homePage({ origin, status, claude }) {
+  const claudeLine = claude.loggedIn
+    ? `Claude: <strong>logged in</strong> (${esc(claude.via)}).`
+    : 'Claude: <strong class="err">not logged in</strong>. Run <code>docker exec -it google-alt claude</code> and use <code>/login</code>.';
   const signIn = status.signedIn
     ? 'Google session: <strong>signed in</strong>.'
     : 'Google session: <strong class="err">not signed in</strong>. <a href="/vnc">Open the browser</a> and sign in once.';
@@ -29,6 +32,7 @@ export function homePage({ origin, status }) {
 <form action="/search" method="get"><input type="search" name="q" placeholder="Search Google" autofocus autocomplete="off"><button type="submit">Go</button></form>
 <div class="meta">
   <div class="card">${signIn} · <a href="/vnc">Remote browser</a> · <a href="/healthz">Status</a></div>
+  <div class="card">${claudeLine}</div>
   <div class="card">Add as a search engine: <code>${esc(origin)}/search?q=%s</code><br>Firefox desktop will also offer it from the address bar.</div>
 </div>`);
 }

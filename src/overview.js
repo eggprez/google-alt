@@ -46,6 +46,14 @@ function key(q) {
   return q.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+export function claudeAuthStatus() {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return { loggedIn: true, via: 'CLAUDE_CODE_OAUTH_TOKEN' };
+  if (process.env.ANTHROPIC_API_KEY) return { loggedIn: true, via: 'ANTHROPIC_API_KEY' };
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(config.dataDir, 'claude');
+  if (fs.existsSync(path.join(dir, '.credentials.json'))) return { loggedIn: true, via: 'claude login' };
+  return { loggedIn: false, via: null, hint: 'docker exec -it google-alt claude' };
+}
+
 export function cacheStats() {
   return { entries: cache.size, inflight: inflight.size };
 }

@@ -40,22 +40,27 @@ per query for an hour by default.
 
 ## Setup
 
-### 1. Claude Code token
-
-On any machine where Claude Code is logged into your Pro/Max subscription:
-
-```bash
-claude setup-token
-```
-
-Copy the printed token.
-
-### 2. Configure
+### 1. Configure
 
 ```bash
 cp .env.example .env
-# set CLAUDE_CODE_OAUTH_TOKEN, and PUBLIC_ORIGIN if not search.bindel.glass
+# set PROXY_SECRET, and PUBLIC_ORIGIN if not search.bindel.glass
 ```
+
+### 2. Claude Code login
+
+Claude Code is installed in the image. After the container is up, log in once from its shell:
+
+```bash
+docker exec -it google-alt claude
+```
+
+Type `/login`, open the printed URL on any device, sign in with your Claude subscription, and paste
+the code back. Credentials land in the `/data` volume, so they survive restarts and image upgrades.
+Exit with `/exit`. The home page and `/healthz` report whether Claude is logged in.
+
+Alternatively run `claude setup-token` on a logged-in machine and set `CLAUDE_CODE_OAUTH_TOKEN` in
+`.env`; a token takes precedence over the saved login.
 
 ### 3. Run
 

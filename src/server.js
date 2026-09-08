@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { config } from './config.js';
 import { fetchGoogle, browserStatus, closeBrowser, getContext, PLACEHOLDER_ID } from './browser.js';
-import { getOverview, cacheStats } from './overview.js';
+import { getOverview, cacheStats, claudeAuthStatus } from './overview.js';
 import { injectOverview } from './inject.js';
 import { homePage, errorPage, opensearchXml } from './pages.js';
 
@@ -49,12 +49,12 @@ function buildGoogleUrl(query, all = false) {
 
 app.get('/healthz', async (req, res) => {
   const browser = await browserStatus();
-  res.json({ ok: browser.running, browser, overview: cacheStats(), model: config.claude.model });
+  res.json({ ok: browser.running, browser, claude: { ...claudeAuthStatus(), model: config.claude.model }, overview: cacheStats() });
 });
 
 app.get('/', async (req, res) => {
   const status = await browserStatus();
-  res.type('html').send(homePage({ origin: config.publicOrigin, status }));
+  res.type('html').send(homePage({ origin: config.publicOrigin, status, claude: claudeAuthStatus() }));
 });
 
 app.get('/opensearch.xml', (req, res) => {
