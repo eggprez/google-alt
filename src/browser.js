@@ -50,7 +50,8 @@ const MOBILE_RE = /Mobile|Android|iPhone|iPad|iPod/i;
 
 async function applyClientEmulation(page, clientUa, acceptLanguage) {
   if (acceptLanguage) await page.setExtraHTTPHeaders({ 'accept-language': acceptLanguage });
-  if (!config.forwardClientUa || !clientUa) return;
+  // Only forward real browser UAs; curl, bots, and health checks get the default so Google serves its normal page.
+  if (!config.forwardClientUa || !clientUa || !/^Mozilla\/5\.0/.test(clientUa)) return;
   const cdp = await page.context().newCDPSession(page);
   const mobile = MOBILE_RE.test(clientUa);
   await cdp.send('Emulation.setUserAgentOverride', {

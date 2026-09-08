@@ -112,7 +112,7 @@ app.get('/api/overview', async (req, res) => {
 });
 
 // noVNC for the one-time Google login. Only reachable through this app (and your SSO in front of it).
-app.get('/vnc', (req, res) => res.redirect(302, '/vnc/vnc.html?autoconnect=true&resize=remote&path=vnc/websockify'));
+app.get('/vnc', (req, res) => res.redirect(302, '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'));
 const vncProxy = createProxyMiddleware({
   pathFilter: '/vnc/',
   target: config.vncTarget,

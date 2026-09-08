@@ -124,6 +124,8 @@ All settings are environment variables, documented in `.env.example`. The ones y
 
 - This scrapes Google with a signed-in browser for personal use. It is against Google's terms in
   the technical sense; at single-user volumes it looks like a person using Chrome, because it is.
+- On phones, Google loads some component CSS lazily via JavaScript, so a few sections (notably
+  "People also ask") render plainer than on google.com. Results, links, and the overview are fine.
 - Google's page scripts are removed, so interactive widgets (expandable "People also ask", carousels,
   the AI Mode tab) are static. Links all work.
 - AI Overview detection looks for a heading reading "AI Overview". If Google renames it, adjust

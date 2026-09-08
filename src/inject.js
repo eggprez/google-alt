@@ -29,6 +29,8 @@ export const OVERVIEW_CSS = `
 .galt-spinner{width:22px;height:22px;border:3px solid var(--galt-line);border-top-color:var(--galt-accent);border-radius:50%;animation:galt-spin .9s linear infinite;margin:6px 0}
 @keyframes galt-spin{to{transform:rotate(360deg)}}
 .galt-error{color:#b3261e}
+/* Google loads some component CSS lazily via JS, which we strip. Unsized inline icons otherwise fill the viewport. */
+svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
 .galt-retry{margin-top:8px;font-size:13px;color:var(--galt-accent);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
 `;
 
