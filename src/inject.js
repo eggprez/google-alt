@@ -100,7 +100,11 @@ html.galt-dark .galt-fix{color:#fbbf24}
 svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
 /* Boogle wordmark */
 .galt-logo-link{display:inline-flex;align-items:center;text-decoration:none}
-.galt-logo{display:block;width:112px;height:34px;max-width:none;max-height:none}
+.galt-logo{display:block;max-width:none;max-height:none}
+/* A lazy image whose URL only ever arrives by XHR. Keeping the box holds the card's shape; this
+   makes the gap read as a picture that did not load rather than as a hole in the layout. */
+.galt-noimg{background:rgba(128,128,128,.12);border-radius:8px}
+html.galt-dark .galt-noimg{background:rgba(255,255,255,.06)}
 /* Google's dropdowns (More, Tools, time and verbatim filters) are hidden until its scripts open them.
    An open menu is moved to <body>, because the nav strip has a transform and overflow that would clip it. */
 .galt-menu-portal{opacity:1!important;position:fixed!important;z-index:2147483000;width:max-content!important;max-width:min(320px,92vw)!important;min-width:140px;

@@ -185,7 +185,17 @@ All settings are environment variables, documented in `.env.example`. The ones y
   with no pictures at all. Removing a `<script>` element does not undo what it already ran, so
   `google.ldi` is still readable at that point. On a sample results page this took 135 unresolved
   placeholders down to zero, with 6 unresolvable ones dropped. Scrolling first does not help:
-  Google's deferred loader will not re-fire for a synthetic scroll.
+  Google's deferred loader will not re-fire for a synthetic scroll. The mobile page keeps about
+  twenty placeholders whose URL only arrives in a later XHR; those keep their box (the gif is
+  transparent, so the card holds its shape) and get `.galt-noimg`. Deleting them, as an earlier
+  version did, collapsed the cards around them and was what made mobile results look mangled.
+- **Mobile markup is a different page.** With `FORWARD_CLIENT_UA=true` a phone gets Google's mobile
+  SERP, which shares almost no structure with the desktop one: result titles are
+  `div[role="heading"][aria-level="3"]` instead of `<h3>`, there is no `<cite>` at all (the address
+  is a plain `<span>` holding `https://host`), and the wordmark is an `<a aria-label="Google">`
+  around an inline SVG rather than `#logo`. `rewrite.js` handles both shapes. Getting the results
+  wrong is quiet but expensive: with no results captured, the overview falls back to researching
+  the query from scratch instead of the fast draft-then-fact-check pass.
 - **Light or dark.** Google decides the SERP theme on the server, from the account setting, and
   ignores the viewer's `prefers-color-scheme` (a page fetched with dark emulated still comes back
   light; the mobile page came back dark with light emulated). So the overview block cannot follow

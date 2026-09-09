@@ -92,13 +92,34 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   }
 
   // Top organic results: the quick overview is drafted from these before Claude verifies it.
-  // Result links are direct URLs, /url?q= redirects, or opaque /goto?url= redirects; the <cite>
-  // breadcrumb carries the readable address in every case.
+  // Desktop titles are <h3> and the readable address is a <cite>. The mobile SERP has neither: the
+  // title is a div[role="heading"][aria-level="3"] inside the result's link, and the address is a
+  // plain <span> holding "https://host". Missing them left mobile with no results at all, which
+  // sent every phone search down the slower research path instead of draft-then-fact-check.
+  // Result links are direct URLs, /url?q= redirects, or opaque /goto?url= redirects.
   const results = [];
   const seenUrls = new Set();
   const googleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
-  for (const h3 of isWebTab ? document.querySelectorAll('#rso h3, #search h3') : []) {
-    const a = h3.closest('a[href]') || (h3.parentElement && h3.parentElement.querySelector('a[href]'));
+  const TITLE_SEL = '#rso h3, #search h3, #rso [role="heading"][aria-level="3"], #search [role="heading"][aria-level="3"]';
+  const URLISH = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+([/›\s]|$)/i;
+  // The address as Google prints it, from a <cite> or, failing that, the first leaf that reads
+  // like a host. Kept short so a snippet sentence starting with a domain can't be mistaken for it.
+  // The <cite> has to be checked too: video and forum cards put "247.6K+ views · 10 years ago"
+  // there, which used to reach Claude as a source host of "247.xn--6k+views10yearsago-d4a".
+  const addressIn = (scope) => {
+    const cite = scope.querySelector('cite');
+    const cited = cite && (cite.textContent || '').trim();
+    if (cited && URLISH.test(cited)) return cited;
+    for (const el of scope.querySelectorAll('span, div')) {
+      if (el.children.length) continue;
+      const t = (el.textContent || '').trim();
+      if (t.length < 4 || t.length > 100 || /\s/.test(t.replace(/\s*›\s*/g, ''))) continue;
+      if (URLISH.test(t)) return t;
+    }
+    return '';
+  };
+  for (const h of isWebTab ? document.querySelectorAll(TITLE_SEL) : []) {
+    const a = h.closest('a[href]') || (h.parentElement && h.parentElement.querySelector('a[href]'));
     if (!a) continue;
     let u;
     try { u = new URL(a.getAttribute('href'), location.href); } catch { continue; }
@@ -108,13 +129,15 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
       if (target) { try { u = new URL(target); } catch { continue; } }
       else if (u.pathname !== '/goto') continue;
     }
-    const item = h3.closest('.MjjYud, [data-hveid], .g') || h3.parentElement;
-    const title = (h3.innerText || h3.textContent || '').trim().slice(0, 200);
+    const item = h.closest('.MjjYud, [data-hveid], .g') || h.parentElement;
+    const title = (h.innerText || h.textContent || '').trim().slice(0, 200);
     if (!title) continue;
-    const cite = a.querySelector('cite') || item.querySelector('cite');
-    const display = cite ? (cite.textContent || '').replace(/\s*›\s*/g, '/').replace(/\s+/g, '').trim() : '';
+    const display = (addressIn(a) || addressIn(item)).replace(/\s*›\s*/g, '/').replace(/\s+/g, '').trim();
     let host = '';
-    try { host = new URL(display.startsWith('http') ? display : 'https://' + display).hostname; } catch { /* no cite */ }
+    try { host = new URL(display.startsWith('http') ? display : 'https://' + display).hostname; } catch { /* no address */ }
+    // A hostname the URL parser accepted but no site could have (it punycodes anything).
+    if (host && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) host = '';
+    // Nothing readable and an opaque /goto link: we would be handing Claude a source it cannot see.
     if (googleHost(u.hostname) && !host) continue;
     const dedupe = display || u.href;
     if (seenUrls.has(dedupe)) continue;
@@ -146,17 +169,25 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   for (const id of Object.keys(ldi)) {
     const url = ldi[id];
     if (typeof url !== 'string' || !url) continue;
-    const img = document.getElementById(id);
-    // Only fill in placeholders; never overwrite a picture Google already loaded.
-    if (!img || !img.tagName || img.tagName !== 'IMG') continue;
-    const cur = img.getAttribute('src') || '';
-    if (cur && !/^data:image\/gif/i.test(cur)) continue;
-    img.setAttribute('src', url);
-    img.removeAttribute('data-deferred');
+    // Google reuses an id across the copies of a card, so fill every element carrying it.
+    for (const img of document.querySelectorAll('[id="' + id.replace(/["\\]/g, '\\$&') + '"]')) {
+      if (img.tagName !== 'IMG') continue;
+      // Only fill in placeholders; never overwrite a picture Google already loaded.
+      const cur = img.getAttribute('src') || '';
+      if (cur && !/^data:image\/gif/i.test(cur)) continue;
+      img.setAttribute('src', url);
+      img.removeAttribute('data-deferred');
+    }
   }
-  // A placeholder we could not resolve would otherwise render as a 1x1 smudge.
+  // Placeholders neither mechanism resolved. The mobile SERP has ~20 of them per page (result and
+  // video thumbnails whose URL arrives in a later XHR we never make), and removing them collapsed
+  // the cards around them — that is what made mobile results look mangled. Keep the box, which the
+  // transparent gif fills silently, and drop only the ones too small to be holding a space open.
   document.querySelectorAll('img[src^="data:image/gif"]').forEach((img) => {
-    if (!img.getAttribute('data-src')) img.remove();
+    const r = img.getBoundingClientRect();
+    if (r.width <= 4 || r.height <= 4) { img.remove(); return; }
+    img.classList.add('galt-noimg');
+    img.setAttribute('alt', '');
   });
 
   const abs = (v) => {
@@ -189,21 +220,61 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   });
 
   // Branding: Google's wordmark becomes Boogle, linking to the proxy's home page.
-  const LOGO = '<svg class="galt-logo" xmlns="http://www.w3.org/2000/svg" width="112" height="34" viewBox="0 0 112 34" role="img" aria-label="Boogle">'
-    + '<defs><linearGradient id="galt-logo-grad" x1="0" y1="0" x2="1" y2="0.6"><stop offset="0" stop-color="#5b21b6"/><stop offset="0.55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>'
-    + '<text x="1" y="27" textLength="109" lengthAdjust="spacingAndGlyphs" font-family="\'Google Sans\',\'Product Sans\',Poppins,\'Trebuchet MS\',Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.5" fill="url(#galt-logo-grad)">Boogle</text></svg>';
-  document.querySelectorAll('#logo, a[aria-label="Go to Google Home"], a[title="Go to Google Home"]').forEach((a) => {
-    a.innerHTML = LOGO;
-    a.setAttribute('href', proxyOrigin + '/');
-    a.setAttribute('aria-label', 'Boogle home');
-    a.setAttribute('title', 'Boogle home');
-    a.classList.add('galt-logo-link');
-  });
+  // The mark to replace differs per page: desktop has #logo holding a 92x30 inline SVG, the mobile
+  // SERP an <a aria-label="Google"> around a 92x36 one (matched by neither of the old selectors,
+  // which is why the phone still showed Google's own logo), and both keep a small square "G" for
+  // the collapsed header. A wordmark squeezed into a 32x32 box is unreadable, so square marks get
+  // a monogram, and every mark is drawn at the size of the one it replaces so nothing reflows.
+  const FONT = "'Google Sans','Product Sans',Poppins,'Trebuchet MS',Arial,sans-serif";
+  let logoSeq = 0;
+  function boogleSvg(w, h) {
+    const id = 'galt-logo-grad-' + (++logoSeq);
+    const grad = '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="0.6">'
+      + '<stop offset="0" stop-color="#5b21b6"/><stop offset="0.55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
+    const square = w / h < 1.6;
+    const mark = square
+      ? '<circle cx="17" cy="17" r="16.5" fill="url(#' + id + ')"/>'
+        + '<text x="17" y="25.5" text-anchor="middle" font-family="' + FONT + '" font-size="23" font-weight="700" fill="#fff">B</text>'
+      : '<text x="1" y="27" textLength="109" lengthAdjust="spacingAndGlyphs" font-family="' + FONT + '"'
+        + ' font-size="32" font-weight="700" letter-spacing="-1.5" fill="url(#' + id + ')">Boogle</text>';
+    return '<svg class="galt-logo" xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"'
+      + ' viewBox="' + (square ? '0 0 34 34' : '0 0 112 34') + '" preserveAspectRatio="xMidYMid meet"'
+      + ' role="img" aria-label="Boogle">' + grad + mark + '</svg>';
+  }
+  // The size Google drew its mark at. A logo in a header that is hidden until you scroll measures
+  // 0x0, so fall back to the width/height attributes before the wordmark's own default.
+  function markSize(el) {
+    const kid = el.querySelector('svg, img') || el;
+    const r = kid.getBoundingClientRect();
+    let w = Math.round(r.width);
+    let h = Math.round(r.height);
+    if (!w || !h) {
+      w = parseFloat(kid.getAttribute('width')) || 0;
+      h = parseFloat(kid.getAttribute('height')) || 0;
+    }
+    if (!w || !h) { w = 112; h = 34; }
+    return { w, h };
+  }
+  function brand(el) {
+    if (el.querySelector('.galt-logo')) return;
+    const size = markSize(el);
+    el.innerHTML = boogleSvg(size.w, size.h);
+    el.setAttribute('aria-label', 'Boogle home');
+    el.classList.add('galt-logo-link');
+    if (el.tagName === 'A') {
+      el.setAttribute('href', proxyOrigin + '/');
+      el.setAttribute('title', 'Boogle home');
+    }
+  }
+  // Exact labels only: "Google apps" (the app grid) also contains the word.
+  document.querySelectorAll('#logo, a[aria-label="Google" i], a[aria-label="Go to Google Home" i], a[title="Go to Google Home" i]')
+    .forEach(brand);
   document.querySelectorAll('img[alt="Google"]').forEach((img) => {
     const a = img.closest('a');
     if (a && a.querySelector('.galt-logo')) return;
+    const size = markSize(img);
     const span = document.createElement('span');
-    span.innerHTML = LOGO;
+    span.innerHTML = boogleSvg(size.w, size.h);
     img.replaceWith(span.firstElementChild);
     if (a) { a.setAttribute('href', proxyOrigin + '/'); a.classList.add('galt-logo-link'); }
   });
