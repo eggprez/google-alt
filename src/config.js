@@ -21,6 +21,8 @@ export const config = {
     // Second pass: verify the snippet-based draft with Claude's own web search.
     verify: bool(env.OVERVIEW_VERIFY, true),
     cacheTtlS: int(env.OVERVIEW_CACHE_TTL_S, 3600),
+    // How long a finished answer stays available for follow-up questions.
+    followupTtlS: int(env.FOLLOWUP_TTL_S, 1800),
     concurrency: int(env.OVERVIEW_CONCURRENCY, 2),
   },
   vncTarget: env.VNC_TARGET || 'http://127.0.0.1:6080',

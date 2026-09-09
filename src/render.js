@@ -4,11 +4,12 @@ import sanitizeHtml from 'sanitize-html';
 marked.setOptions({ gfm: true, breaks: false });
 
 const SANITIZE = {
-  allowedTags: ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'sup', 'h3', 'h4', 'h5', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'span'],
+  allowedTags: ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'mark', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'sup', 'h3', 'h4', 'h5', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'span', 'dl', 'dt', 'dd'],
   allowedAttributes: {
     a: ['href', 'title', 'target', 'rel', 'class'],
     sup: ['class'],
     span: ['class'],
+    mark: ['class'],
     td: ['align'],
     th: ['align'],
   },
@@ -51,16 +52,18 @@ export function splitSources(text) {
       .replace(/^\s*(?:[-*•]\s*)?\[?\d{1,3}[\].:)]?\s*/, '')
       .replace(/^[\s\-–—:|()[\]<>"*]+|[\s\-–—:|()[\]<>"*]+$/g, '')
       .trim();
-    sources.push({ id, title: title || hostOf(url), url: url.replace(/[.,;:]+$/, '') });
+    const clean = url.replace(/[.,;:]+$/, '');
+    sources.push({ id, title: title || hostOf(clean), url: clean, host: hostOf(clean) });
   }
   return { answer, sources };
 }
 
 /**
- * Parse the verification pass:
+ * Parse the fact-check pass, which always returns the overview rewritten rather than a note
+ * about it:
  *   STATUS: verified | corrected
- *   CHANGES: (bullets)
- *   ANSWER: (markdown)
+ *   CHANGES: (bullets; empty when nothing changed)
+ *   ANSWER: (the full overview, with every edited span wrapped in {{ }})
  *   Sources: (list)
  */
 export function parseVerification(text) {
@@ -70,56 +73,65 @@ export function parseVerification(text) {
   const changes = changesBlock.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((l) => l && !/^none\b/i.test(l));
   const answerBlock = (t.match(/^\s*\**ANSWER\**\s*:\s*\**\s*\n([\s\S]*)$/im) || [])[1] || '';
   const { answer, sources } = splitSources(answerBlock);
-  const corrected = status === 'corrected' || (!status && answer.trim().length > 0);
-  return { status: corrected ? 'corrected' : (status === 'unverified' ? 'unverified' : 'verified'), changes, answer: answer.trim(), sources };
+  // What the reply did outranks what it says it did: a listed change, or a marked-up span in the
+  // answer, means the overview was edited even when the status line claims otherwise.
+  const corrected = status === 'corrected' || changes.length > 0 || /\{\{[\s\S]*?\}\}/.test(answer);
+  return {
+    status: corrected ? 'corrected' : (status === 'unverified' ? 'unverified' : 'verified'),
+    changes,
+    answer: answer.trim(),
+    sources,
+  };
+}
+
+// The fact-check wraps each span it rewrote in {{ }}. Turn those into <mark> before the markdown
+// is parsed, so inline formatting inside a correction still works, and drop any unpaired brace.
+function markCorrections(md) {
+  let out = '';
+  let rest = md;
+  for (;;) {
+    const open = rest.indexOf('{{');
+    if (open < 0) break;
+    const close = rest.indexOf('}}', open + 2);
+    if (close < 0) break;
+    out += rest.slice(0, open) + '<mark class="galt-fix">' + rest.slice(open + 2, close) + '</mark>';
+    rest = rest.slice(close + 2);
+  }
+  return (out + rest).replace(/\{\{|\}\}/g, '');
 }
 
 /**
- * Turn a markdown answer + sources into the HTML body of the overview block.
- * Citations like [1] or [2][3] become superscript links to the matching source.
- * - streaming: partial text; citations render as plain superscripts and no source list is shown.
- * - citedOnly: list only the sources the text actually cites (for snippet-based answers, which
- *   receive every top result as a candidate).
+ * Turn a markdown answer into the HTML body of the overview.
+ * Citations like [1] or [2][3] become pill links to the matching source.
+ * - streaming: partial text; citations render as inert pills (sources may not be known yet).
  */
-export function renderOverview(answerMd, sources, { streaming = false, citedOnly = false } = {}) {
+export function renderAnswer(answerMd, sources, { streaming = false } = {}) {
   const byId = new Map();
   for (const s of sources || []) {
     if (s && s.url && /^https?:/i.test(s.url)) byId.set(Number(s.id), s);
   }
-  // Demote headings so Google's page structure stays sane.
-  const md = (answerMd || '').replace(/^(#{1,2})\s/gm, '### ');
-  let html = marked.parse(md);
-  html = sanitizeHtml(html, SANITIZE);
+  // Demote headings so the page keeps one document outline.
+  const md = markCorrections((answerMd || '').replace(/^(#{1,2})\s/gm, '### '));
+  let html = sanitizeHtml(marked.parse(md), SANITIZE);
 
-  const cited = new Set();
-  // Replace bracketed citations after sanitizing so we control the markup.
-  html = html.replace(/\[(\d{1,3})\]/g, (m, n) => {
-    if (streaming) return `<sup class="galt-cite"><span>${n}</span></sup>`;
+  // Replace bracketed citations after sanitizing so we control the markup. "[1, 2]" and "[1][2]"
+  // both occur; each number becomes its own pill.
+  html = html.replace(/\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g, (m, group) => group.split(',').map((part) => {
+    const n = part.trim();
     const s = byId.get(Number(n));
-    if (!s) return '';
-    cited.add(Number(n));
-    return `<sup class="galt-cite"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}">${n}</a></sup>`;
-  });
-  if (streaming) return `<div class="galt-answer">${html}</div>`;
+    if (streaming || !s) return streaming ? `<span class="galt-cite">${n}</span>` : '';
+    return `<a class="galt-cite" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}">${n}</a>`;
+  }).join(''));
 
-  const list = Array.from(byId.values())
-    .filter((s) => !citedOnly || cited.has(Number(s.id)))
-    .sort((a, b) => Number(a.id) - Number(b.id))
-    .map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer"><span class="galt-src-title">${esc(s.title || s.url)}</span><span class="galt-src-host">${esc(s.host || hostOf(s.url))}</span></a></li>`)
-    .join('');
-  const sourcesHtml = list ? `<div class="galt-sources"><div class="galt-sources-label">Sources</div><ol>${list}</ol></div>` : '';
-  return `<div class="galt-answer">${html}</div>${sourcesHtml}`;
+  return `<div class="galt-answer">${html}</div>`;
 }
 
-/** The banner shown above a corrected answer, or an unobtrusive note when verification failed. */
-export function renderVerification(v) {
-  if (!v) return '';
-  if (v.status === 'corrected') {
-    const items = v.changes.length ? `<ul>${v.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : '';
-    return `<div class="galt-flag galt-flag-corrected"><strong>Corrected after checking the web.</strong>${items}</div>`;
-  }
-  if (v.status === 'failed') {
-    return `<div class="galt-flag galt-flag-muted">Could not verify this answer: ${esc(v.error || 'verification failed')}</div>`;
-  }
-  return '';
+/** Which sources the finished answer actually cites, in citation order. */
+export function citedSources(answerMd, sources) {
+  const cited = new Set(Array.from((answerMd || '').matchAll(/\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g))
+    .flatMap((m) => m[1].split(',').map((n) => Number(n.trim()))));
+  return (sources || [])
+    .filter((s) => cited.has(Number(s.id)))
+    .map((s) => ({ id: Number(s.id), title: s.title || hostOf(s.url), url: s.url, host: s.host || hostOf(s.url) }))
+    .sort((a, b) => a.id - b.id);
 }
