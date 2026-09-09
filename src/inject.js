@@ -6,6 +6,8 @@ export const PAGE_CSS = `
   font-family:Google Sans,Roboto,Arial,sans-serif;font-size:15px;line-height:1.5;max-width:100%;overflow-wrap:anywhere}
 @media (prefers-color-scheme:dark){.galt{--galt-bg:#1f2125;--galt-fg:#e3e3e3;--galt-muted:#9aa0a6;--galt-line:#3c4043;--galt-accent:#a8c7fa;--galt-chip:#2c3a4d;--galt-purple:#c4b5fd}}
 .galt *{box-sizing:border-box}
+/* Our own display rules would otherwise beat the UA stylesheet's [hidden] {display:none}. */
+.galt [hidden]{display:none!important}
 .galt-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;color:var(--galt-muted);flex-wrap:wrap}
 .galt-badge{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--galt-fg);font-size:14px}
 .galt-badge::before{content:"";width:16px;height:16px;border-radius:50%;background:conic-gradient(from 90deg,#5b21b6,#8b5cf6,#c084fc,#5b21b6)}
@@ -43,6 +45,34 @@ export const PAGE_CSS = `
 .galt-v-unverified .galt-phase,.galt-v-failed .galt-phase{color:var(--galt-muted)}
 @media (prefers-color-scheme:dark){.galt-v-verified .galt-phase{color:#81c995}.galt-v-corrected .galt-phase{color:#fcd34d}}
 .galt-retry{margin-top:8px;font-size:13px;color:var(--galt-accent);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
+.galt-body h3,.galt-body h4,.galt-body h5{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--galt-purple);margin:14px 0 6px}
+.galt-body>.galt-answer>p:first-child{font-size:16px;line-height:1.5;font-weight:500}
+.galt-answer>p:first-child{font-size:16px;line-height:1.5;font-weight:500}
+.galt-body li>strong:first-child{color:var(--galt-accent)}
+.galt-body li::marker{color:var(--galt-purple)}
+.galt-body blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid var(--galt-purple);border-radius:0 8px 8px 0;background:var(--galt-chip);color:var(--galt-muted)}
+.galt-body blockquote p:last-child{margin-bottom:0}
+.galt-body th{background:var(--galt-chip);font-weight:600}
+/* What the fact-check rewrote, in its own colour. */
+.galt-fix{background:none;color:#b45309;font-weight:500;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+@media (prefers-color-scheme:dark){.galt-fix{color:#fbbf24}}
+.galt-fix *{color:inherit}
+/* Follow-up questions. */
+.galt-fu{margin-top:12px;padding-top:10px;border-top:1px dashed var(--galt-line)}
+.galt-fu-q{display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px;margin-bottom:4px}
+.galt-fu-q::before{content:"";width:14px;height:14px;flex:none;border-radius:50%;background:conic-gradient(from 90deg,#5b21b6,#8b5cf6,#c084fc,#5b21b6)}
+.galt-fu-a{font-size:15px;line-height:1.5}
+.galt-fu-a p{margin:0 0 8px}.galt-fu-a>:last-child{margin-bottom:0}
+.galt-fu-a ul,.galt-fu-a ol{margin:6px 0 8px;padding-left:22px}
+.galt-fu.galt-fu-busy .galt-fu-q::before{animation:galt-spin 1.4s linear infinite}
+.galt-ask{display:flex;align-items:center;gap:8px;margin-top:12px;padding:3px 3px 3px 12px;border-radius:22px;background:var(--galt-bg);border:1px solid var(--galt-line)}
+.galt-ask:focus-within{border-color:var(--galt-accent);box-shadow:0 0 0 2px var(--galt-chip)}
+.galt-ask-input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:inherit;font-size:14px;color:var(--galt-fg);padding:6px 0}
+.galt-ask-input::placeholder{color:var(--galt-muted)}
+.galt-ask-go{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:0;cursor:pointer;
+  color:#fff;background:var(--galt-purple);font:inherit;font-size:15px;line-height:1}
+.galt-ask-go:hover{filter:brightness(1.1)}
+.galt-ask-busy .galt-ask-go{opacity:.5;pointer-events:none}
 /* Google loads some component CSS lazily via JS, which we strip. Unsized inline icons otherwise fill the viewport. */
 svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
 /* Boogle wordmark */
@@ -122,30 +152,40 @@ export const PAGE_SCRIPT = `
 })();
 `;
 
-// Fills the overview block: streams Claude's answer as it is written, with search activity in the header.
+// Fills the overview block: streams Claude's answer as it is written, with search activity in the
+// header, swaps in the fact-checked rewrite when it lands, and takes follow-up questions.
 export const OVERVIEW_SCRIPT = `
 (function(){
   var root=document.getElementById('galt-aio'); if(!root) return;
   var q=root.getAttribute('data-q'), body=root.querySelector('.galt-body'), status=root.querySelector('.galt-status'), phase=root.querySelector('.galt-phase');
-  var t0, tick, es, finished, errs;
+  var followups=root.querySelector('.galt-followups'), askForm=root.querySelector('.galt-ask'), askInput=askForm?askForm.querySelector('.galt-ask-input'):null;
+  var t0, tick, es, finished, errs, ready, history=[];
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function clock(){ status.textContent=Math.round((Date.now()-t0)/1000)+'s'; }
   function stop(){ clearInterval(tick); if(es){ es.close(); es=null; } }
   function fail(msg){
-    stop(); root.classList.remove('galt-streaming'); phase.textContent=''; status.textContent='';
-    body.innerHTML='<div class="galt-error">Overview failed: '+String(msg||'unknown error').replace(/[<>&]/g,'')+'</div><button class="galt-retry" type="button">Try again</button>';
-    body.querySelector('.galt-retry').onclick=load;
+    finished=true; stop(); root.classList.remove('galt-streaming'); phase.textContent=''; status.textContent='';
+    body.innerHTML='<div class="galt-error">Overview failed: '+esc(msg||'unknown error')+'</div><button class="galt-retry" type="button">Try again</button>';
+    body.querySelector('.galt-retry').onclick=function(){ load(); };
   }
   var LABELS={verified:'Verified',corrected:'Corrected',unverified:'Unverified',failed:'Not verified'};
-  function finish(d){
-    stop(); finished=true; root.classList.remove('galt-streaming');
-    body.innerHTML=d.html; status.textContent=d.cached?'cached':(Math.round(d.ms/100)/10)+'s';
-    var v=d.verification&&d.verification.status;
-    phase.textContent=v?LABELS[v]||'':'';
+  function setVerdict(v){
+    root.className=root.className.replace(/\\bgalt-v-[a-z]+\\b/g,'').trim();
+    phase.textContent=v&&LABELS[v]?LABELS[v]:'';
     if(v) root.classList.add('galt-v-'+v);
   }
+  function finish(d){
+    stop(); finished=true; ready=true; root.classList.remove('galt-streaming');
+    body.innerHTML=d.html; status.textContent=d.cached?'cached':(Math.round(d.ms/100)/10)+'s';
+    setVerdict(d.verification&&d.verification.status);
+    if(askForm) askForm.hidden=false;
+  }
   function load(){
-    finished=false; errs=0; t0=Date.now(); root.className='galt galt-streaming'; phase.textContent='Searching'; clock(); tick=setInterval(clock,1000);
+    finished=false; errs=0; ready=false; history.length=0; t0=Date.now();
+    root.className='galt galt-streaming'; phase.textContent='Searching'; clock(); tick=setInterval(clock,1000);
     body.innerHTML='<div class="galt-spinner"></div>';
+    if(followups) followups.innerHTML='';
+    if(askForm) askForm.hidden=true;
     var url='/api/overview?q='+encodeURIComponent(q);
     if(!window.EventSource){
       fetch(url,{credentials:'same-origin'}).then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error||('HTTP '+r.status)); return d; }); }).then(finish).catch(function(e){ fail(e.message||e); });
@@ -155,11 +195,75 @@ export const OVERVIEW_SCRIPT = `
     es.addEventListener('status',function(e){ phase.textContent=JSON.parse(e.data).text; });
     es.addEventListener('snapshot',function(e){ body.innerHTML=JSON.parse(e.data).html+'<span class="galt-cursor"></span>'; });
     es.addEventListener('quick',function(e){ body.innerHTML=JSON.parse(e.data).html; });
+    // The fact-check returns the overview rewritten, not a note about it: swap the whole body.
+    es.addEventListener('check',function(e){ var d=JSON.parse(e.data); body.innerHTML=d.html; setVerdict(d.verification&&d.verification.status); });
     es.addEventListener('done',function(e){ finish(JSON.parse(e.data)); });
     es.addEventListener('fail',function(e){ fail(JSON.parse(e.data).error); });
     // EventSource reconnects by itself and the server replays the run's state; give up after a few tries.
-    es.onerror=function(){ if(finished) return; if(es.readyState===2||++errs>3) fail('connection lost'); else phase.textContent='Reconnecting'; };
+    es.onerror=function(){ if(finished||!es) return; if(this.readyState===2||++errs>3) fail('connection lost'); else phase.textContent='Reconnecting'; };
   }
+
+  /* follow-up questions */
+  var asking=false;
+  if(askForm) askForm.addEventListener('submit',function(e){
+    e.preventDefault();
+    var question=askInput.value.trim();
+    if(!question||asking||!ready) return;
+    asking=true; askInput.value=''; askForm.classList.add('galt-ask-busy');
+    var block=document.createElement('div');
+    block.className='galt-fu galt-fu-busy';
+    block.innerHTML='<div class="galt-fu-q"><span></span></div><div class="galt-fu-a"><div class="galt-spinner"></div></div>';
+    block.querySelector('.galt-fu-q span').textContent=question;
+    followups.appendChild(block);
+    var answerEl=block.querySelector('.galt-fu-a'), answered=false;
+    var ac=new AbortController();
+    var abort=function(){ ac.abort(); };
+    window.addEventListener('pagehide',abort,{once:true});
+    fetch('/api/followup',{
+      method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', signal:ac.signal,
+      body:JSON.stringify({q:q,question:question,history:history.slice(-3)})
+    }).then(function(r){
+      if(!r.ok||!r.body) return r.json().catch(function(){ return {}; }).then(function(d){ throw new Error(d.error||('HTTP '+r.status)); });
+      var reader=r.body.getReader(), dec=new TextDecoder(), buf='';
+      function pump(){
+        return reader.read().then(function(res){
+          if(res.done) return;
+          buf+=dec.decode(res.value,{stream:true});
+          var parts=buf.split('\\n\\n'); buf=parts.pop();
+          parts.forEach(function(chunk){
+            var ev='message', data='';
+            chunk.split('\\n').forEach(function(line){
+              if(line.indexOf('event:')===0) ev=line.slice(6).trim();
+              else if(line.indexOf('data:')===0) data+=line.slice(5).trim();
+            });
+            if(!data) return;
+            var d; try{ d=JSON.parse(data); }catch(err){ return; }
+            if(ev==='snapshot') answerEl.innerHTML=d.html+'<span class="galt-cursor"></span>';
+            else if(ev==='done'){ answerEl.innerHTML=d.html; answered=true; history.push({question:question,answer:d.answer||''}); }
+            else if(ev==='fail') throw new Error(d.error||'follow-up failed');
+          });
+          return pump();
+        });
+      }
+      return pump();
+    }).then(function(){
+      if(!answered) throw new Error('no answer was produced');
+    }).catch(function(err){
+      if(ac.signal.aborted) return;
+      answerEl.innerHTML='<div class="galt-error">'+esc(err.message||'Follow-up failed.')+'</div>';
+    }).then(function(){
+      block.classList.remove('galt-fu-busy');
+      askForm.classList.remove('galt-ask-busy');
+      asking=false;
+      window.removeEventListener('pagehide',abort);
+      askInput.focus();
+    });
+  });
+
+  window.addEventListener('pagehide',function(){ stop(); });
+  // A page restored from the back/forward cache shows whatever was on screen when it was frozen,
+  // and its EventSource is dead. Reload the overview; the server has it cached.
+  window.addEventListener('pageshow',function(e){ if(e.persisted) load(); });
   load();
 })();
 `;
@@ -168,6 +272,11 @@ export function overviewBlock(q) {
   return `<div id="galt-aio" class="galt galt-streaming" data-q="${esc(q)}">
   <div class="galt-head"><span class="galt-badge">AI Overview</span><span class="galt-by">by Claude</span><span class="galt-phase">Searching</span><span class="galt-status"></span></div>
   <div class="galt-body"><div class="galt-spinner"></div></div>
+  <div class="galt-followups"></div>
+  <form class="galt-ask" autocomplete="off" hidden>
+    <input type="text" name="question" class="galt-ask-input" placeholder="Ask a follow-up\u2026" maxlength="500" aria-label="Ask a follow-up question">
+    <button type="submit" class="galt-ask-go" aria-label="Ask">\u2192</button>
+  </form>
 </div>`;
 }
 

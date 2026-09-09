@@ -10,8 +10,13 @@ results on the page, then a verification pass with Claude's own web search that 
 anything wrong. Everything else on the page is Google as normal, and result links go straight to the
 real sites in your own browser.
 
-Only the main web results page is proxied. Images, News, Maps, Shopping and friends link out to
-google.com, where you are signed in anyway.
+Every tab is proxied — web, images, videos, news, shopping — and every Google search link on the
+page is rewritten to come back through the proxy, so switching to Images and back never drops you
+onto google.com (which is what used to make Google's own AI Overview reappear). Only the web tab
+gets a Claude overview; the others are Google's page as normal.
+
+The page keeps Google's own look. The only thing that changes visually is the wordmark (a purple
+**Boogle**), the page title, and the overview block itself.
 
 ## How it works
 
@@ -33,18 +38,28 @@ google-alt container
 User-Agent (so Google sends mobile markup to phones), then rewrites the DOM in place: Google's
 overview band (found by its container, so the "Thinking" skeleton counts too) is removed and our
 block is inserted at the top of the results column, scripts are stripped, URLs absolutized,
-tracking pings removed, web-search links pointed back at the proxy, the logo replaced, and the top
-organic results (title, address, snippet) captured for the overview. A small page script restores
+tracking pings removed, every Google search link pointed back at the proxy, the logo replaced, and
+the top organic results (title, address, snippet) captured for the overview. A small page script restores
 what Google's scripts used to do: Enter submits the search box, and the More / Tools / time-range
 menus open. Queries where Google showed no overview get no Claude overview either.
 
 `/api/overview?q=…&stream=1` is a server-sent-events stream the page subscribes to:
 
-1. **Quick draft.** `claude -p` with no tools gets the query plus the captured top results and
-   writes an answer citing them by number. Text streams into the block as it is generated.
-2. **Verification.** A second run with `WebSearch`/`WebFetch` checks every claim. The header shows
-   what it is searching; when it finishes the block is marked **Verified**, or replaced with the
-   corrected answer under a **Corrected after checking the web** banner listing what changed.
+1. **Quick draft.** `claude -p` with **no tools at all** (`WebSearch`/`WebFetch` are explicitly
+   disallowed) gets the query plus the top results captured from the page you are looking at, and
+   writes an answer citing them by number. Text streams into the block as it is generated. The
+   prompt asks for shape rather than prose: a one-line lead answer, then `###` headings,
+   `**Label:** value` bullets, comparison tables and `>` callouts.
+2. **Fact-check.** A second run with `WebSearch`/`WebFetch` checks every claim and returns the
+   overview **rewritten**, not a note about it. The header shows what it is searching. Each span
+   the check changed comes back wrapped in `{{ }}` and is rendered in a different colour, under a
+   **Corrected after checking the web** banner listing what changed. A clean check just marks the
+   block **Verified**.
+
+Under the answer, a box takes **follow-up questions** (`POST /api/followup`). A follow-up reuses
+the overview's sources, may search the web for anything they do not cover, and lists only the
+sources it newly introduced. Answers stay available for follow-ups for `FOLLOWUP_TTL_S` (30 min)
+regardless of the overview cache.
 
 Without captured results (direct API call, or the page was served before a restart) Claude
 researches from scratch with its own search instead. Finished overviews are cached per query for
@@ -136,7 +151,8 @@ All settings are environment variables, documented in `.env.example`. The ones y
 | `CLAUDE_MODEL` | `sonnet` | Model for the overview. `opus` is slower and better. |
 | `OVERVIEW_CACHE_TTL_S` | `3600` | Reuse an overview for the same query. `0` disables. |
 | `OVERVIEW_VERIFY` | `true` | Run the second, web-searching verification pass. `false` keeps only the quick draft. |
-| `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps for the verification pass. |
+| `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps for the fact-check and follow-ups. |
+| `FOLLOWUP_TTL_S` | `1800` | How long a finished answer stays available for follow-up questions. |
 | `PROXY_SECRET` | empty | Require this value in an `X-Proxy-Secret` header on every request. |
 | `FORWARD_CLIENT_UA` | `true` | Ask Google for markup matching the requesting browser. |
 | `AIO_WAIT_MS` | `2500` | How long to wait for Google's overview to appear before serving. |
@@ -147,7 +163,8 @@ All settings are environment variables, documented in `.env.example`. The ones y
 |---|---|
 | `/` | Minimal search box, sign-in status, setup hints |
 | `/search?q=` | Proxied Google web results with Claude overview |
-| `/api/overview?q=` | JSON `{html, sources, verification, mode, ms, cached, cost}` |
+| `/api/overview?q=` | JSON `{html, sources, verification, mode, ms, cached, cost}`. `&stream=1` for SSE, `&refresh=1` to bypass the cache |
+| `POST /api/followup` | `{q, question, history}` → SSE `status` / `snapshot` / `done` / `fail` |
 | `/api/overview?q=&stream=1` | Server-sent events: `status`, `snapshot`, `quick`, `done`, `fail` |
 | `/vnc` | noVNC into the container's Chromium |
 | `/healthz` | Browser and cache status |
@@ -164,7 +181,9 @@ All settings are environment variables, documented in `.env.example`. The ones y
 - AI Overview detection keys on Google's overview container (`AIO_SELECTOR` in `src/rewrite.js`),
   with the "AI Overview" / "Thinking" heading as a fallback. If Google changes its markup, adjust
   those. The menus rely on Google's `eBYPP` / `oYxtQd` / `H9P06b` / `xl07Ob` attribute names.
-- The verification pass roughly doubles the Claude usage per search. Set `OVERVIEW_VERIFY=false`
+- Proxying every tab means an image or news click costs a Chromium page load and one more request
+  to Google from your IP, where it used to be a redirect to google.com.
+- The fact-check pass roughly doubles the Claude usage per search. Set `OVERVIEW_VERIFY=false`
   to keep only the quick draft (which never searches the web itself).
 - Server-sent events need an unbuffered reverse proxy; the shipped nginx configs set
   `proxy_buffering off`, and the app also sends `X-Accel-Buffering: no`.

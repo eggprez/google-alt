@@ -10,6 +10,12 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const AIO = '[jscontroller="EYwa3d"][data-q], #m-x-content, #eKIzJc, div[data-attrid="AIOverview"]';
   const bodyText = (document.body && document.body.innerText || '').slice(0, 4000);
   const host = location.hostname;
+  const here = new URL(location.href);
+  // Which tab this is. Google addresses tabs with udm= (new) or tbm= (older links still work).
+  // Every tab is proxied, but only the web tab has an AI Overview or organic results to capture.
+  const udm = here.searchParams.get('udm') || '';
+  const tbm = here.searchParams.get('tbm') || '';
+  const isWebTab = !tbm && (!udm || udm === '14' || udm === '48');
 
   if (location.pathname.startsWith('/sorry') || /unusual traffic from your computer network|not a robot/i.test(bodyText)) {
     return { blocked: 'captcha', title: document.title };
@@ -60,7 +66,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     };
     const unavailable = Array.from(block.querySelectorAll('span, div'))
       .some((el) => el.children.length === 0 && /AI Overview is not available|Can't generate an AI overview/i.test(el.textContent || '') && visible(el));
-    hadOverview = !unavailable;
+    hadOverview = !unavailable && isWebTab;
 
     const rso = document.getElementById('rso');
     const col = document.getElementById('center_col') || (rso && (rso.closest('#res, #search') || rso));
@@ -91,7 +97,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const results = [];
   const seenUrls = new Set();
   const googleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
-  for (const h3 of document.querySelectorAll('#rso h3, #search h3')) {
+  for (const h3 of isWebTab ? document.querySelectorAll('#rso h3, #search h3') : []) {
     const a = h3.closest('a[href]') || (h3.parentElement && h3.parentElement.querySelector('a[href]'));
     if (!a) continue;
     let u;
@@ -181,14 +187,8 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   });
   document.title = document.title.replace(/\s*-\s*Google Search\s*$/i, ' - Boogle');
 
-  const TRACKING = ['ved', 'ei', 'sa', 'sca_esv', 'sxsrf', 'biw', 'bih', 'dpr', 'source', 'sclient', 'uact', 'fbs', 'sqi', 'rlz', 'iflsig', 'gs_lp', 'gs_lcrp', 'gs_ssp'];
+  const TRACKING = ['ved', 'ei', 'sa', 'sca_esv', 'sxsrf', 'biw', 'bih', 'dpr', 'source', 'sclient', 'uact', 'fbs', 'sqi', 'rlz', 'iflsig', 'gs_lp', 'gs_lcrp', 'gs_ssp', 'vsint', 'aep', 'ntc', 'cs'];
   const isGoogleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
-  const isWebSearch = (u) => {
-    if (u.searchParams.has('tbm')) return false;
-    const udm = u.searchParams.get('udm');
-    if (udm && udm !== '14' && udm !== 'web') return false;
-    return true;
-  };
 
   document.querySelectorAll('a[href]').forEach((a) => {
     a.removeAttribute('ping');
@@ -202,7 +202,10 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
         const target = u.searchParams.get('q') || u.searchParams.get('url');
         if (target && /^https?:/i.test(target)) { a.setAttribute('href', target); return; }
       }
-      if (u.pathname === '/search' && u.searchParams.has('q') && isWebSearch(u)) {
+      // Every tab, filter and results page stays on the proxy. Letting a tab link out to
+      // google.com is what used to bring Google's own AI Overview back when you switched to
+      // Images and came back.
+      if (u.pathname === '/search' && (u.searchParams.has('q') || u.searchParams.has('udm'))) {
         TRACKING.forEach((k) => u.searchParams.delete(k));
         a.setAttribute('href', proxyOrigin + '/search?' + u.searchParams.toString());
         return;
@@ -220,6 +223,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
 
   return {
     blocked: null,
+    tab: isWebTab ? 'web' : (udm ? 'udm:' + udm : 'tbm:' + tbm),
     hadOverview,
     results,
     title: document.title,
