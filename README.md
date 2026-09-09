@@ -64,7 +64,7 @@ Alternatively run `claude setup-token` on a logged-in machine and set `CLAUDE_CO
 
 ### 3. Run
 
-Images are published to `ghcr.io/eggprez/google-alt` by GitHub Actions on every push to `main`.
+Images are published to `ghcr.io/eggprez/googlealt` by GitHub Actions on every push to `main`.
 
 ```bash
 docker compose up -d

@@ -1,6 +1,6 @@
 services:
   google-alt:
-    image: ghcr.io/eggprez/google-alt:latest
+    image: ghcr.io/eggprez/googlealt:latest
     # To build locally instead of pulling: uncomment the next line and run `docker compose up -d --build`.
     # build: .
     container_name: google-alt
