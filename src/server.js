@@ -1,4 +1,6 @@
 import express from 'express';
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { timingSafeEqual } from 'node:crypto';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { config } from './config.js';
@@ -13,6 +15,30 @@ app.disable('x-powered-by');
 app.set('trust proxy', true);
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+const gzip = promisify(zlib.gzip);
+const brotli = promisify(zlib.brotliCompress);
+
+// A hydrated results page is a couple of megabytes of markup and inlined CSS, which is a lot to
+// pull over mobile data; it compresses to roughly a fifth of that. Nginx in front may compress
+// too, in which case it just passes ours through.
+async function sendHtml(req, res, html) {
+  res.set('Vary', 'Accept-Encoding');
+  const accept = String(req.headers['accept-encoding'] || '');
+  try {
+    if (/\bbr\b/.test(accept)) {
+      const body = await brotli(html, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } });
+      return res.set('Content-Encoding', 'br').type('html').send(body);
+    }
+    if (/\bgzip\b/.test(accept)) {
+      const body = await gzip(html, { level: 6 });
+      return res.set('Content-Encoding', 'gzip').type('html').send(body);
+    }
+  } catch (e) {
+    log('compression failed, sending plain', e.message);
+  }
+  return res.type('html').send(html);
+}
 
 // Optional shared secret so only traffic that came through the reverse proxy is served.
 function hasProxySecret(headers) {
@@ -103,7 +129,7 @@ app.get('/search', async (req, res) => {
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       'X-Galt-Overview': result.hadOverview ? '1' : '0',
     });
-    res.type('html').send(html);
+    await sendHtml(req, res, html);
   } catch (e) {
     log('search error', e);
     res.status(502).type('html').send(errorPage({

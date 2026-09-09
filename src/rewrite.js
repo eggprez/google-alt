@@ -72,11 +72,18 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     const col = document.getElementById('center_col') || (rso && (rso.closest('#res, #search') || rso));
     const ph = document.createElement('div');
     ph.id = placeholderId;
+    // Google ships a component's CSS at its first use on the page, and the overview block is the
+    // first thing on the page, so it carries <style> elements that also style results further
+    // down (18KB of them on a mobile SERP, including the rule that lays result thumbnails out in
+    // a row). Dropping the block took those with it, which is what left everything below the
+    // overview unstyled: stacked thumbnails, chips falling back to bulleted lists, oversized text.
+    // Put them back exactly where they were so the cascade is unchanged.
+    const keptStyles = Array.from(block.querySelectorAll('style'));
     if (col && !col.contains(block)) {
       // Google's band sits above the results column and gets its width from CSS that is loaded
       // lazily by scripts we strip. Drop the band and put ours at the top of the results column,
       // which is the same visual spot at the column's proper width.
-      block.remove();
+      block.replaceWith(...keptStyles);
       if (hadOverview) {
         let first = col.firstElementChild;
         while (first && /^(STYLE|SCRIPT)$/.test(first.tagName)) first = first.nextElementSibling;
@@ -85,9 +92,9 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     } else if (hadOverview) {
       // Already inside the results column (Google sometimes places it after the first result).
       block.removeAttribute('style');
-      block.replaceChildren(ph);
+      block.replaceChildren(...keptStyles, ph);
     } else {
-      block.remove();
+      block.replaceWith(...keptStyles);
     }
   }
 

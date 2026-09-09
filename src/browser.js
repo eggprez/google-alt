@@ -65,20 +65,24 @@ export async function getContext() {
 
 const MOBILE_RE = /Mobile|Android|iPhone|iPad|iPod/i;
 
+// We take the form factor from the client and nothing else. Passing the client's own UA through
+// looked more faithful but backfired: the engine here is Chromium, so a Firefox-Android UA
+// contradicts the Chrome client hints Chromium sends, and Google answers with a stripped template.
+// Measured on one query: 132KB with 19KB of CSS, no #rso, no results and no AI Overview at all,
+// against 383KB with 187KB of CSS and 7 results for the Chrome UA below. That bare page is what
+// reached a phone as unstyled results under the overview.
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
+
 async function applyClientEmulation(page, clientUa, acceptLanguage) {
   if (acceptLanguage) await page.setExtraHTTPHeaders({ 'accept-language': acceptLanguage });
-  // Only forward real browser UAs; curl, bots, and health checks get the default so Google serves its normal page.
+  // Only react to real browser UAs; curl, bots, and health checks get the desktop default.
   if (!config.forwardClientUa || !clientUa || !/^Mozilla\/5\.0/.test(clientUa)) return;
+  // Desktop clients already match the context's own Chrome UA, so there is nothing to override.
+  if (!MOBILE_RE.test(clientUa)) return;
   const cdp = await page.context().newCDPSession(page);
-  const mobile = MOBILE_RE.test(clientUa);
-  await cdp.send('Emulation.setUserAgentOverride', {
-    userAgent: clientUa,
-    platform: mobile ? (/iPhone|iPad/.test(clientUa) ? 'iPhone' : 'Linux armv8l') : undefined,
-  });
-  if (mobile) {
-    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 412, height: 915, deviceScaleFactor: 2.6, mobile: true });
-    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  }
+  await cdp.send('Emulation.setUserAgentOverride', { userAgent: MOBILE_UA, platform: 'Linux armv8l' });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 412, height: 915, deviceScaleFactor: 2.6, mobile: true });
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 }
 
 /**

@@ -154,7 +154,7 @@ All settings are environment variables, documented in `.env.example`. The ones y
 | `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps for the fact-check and follow-ups. |
 | `FOLLOWUP_TTL_S` | `1800` | How long a finished answer stays available for follow-up questions. |
 | `PROXY_SECRET` | empty | Require this value in an `X-Proxy-Secret` header on every request. |
-| `FORWARD_CLIENT_UA` | `true` | Ask Google for markup matching the requesting browser. |
+| `FORWARD_CLIENT_UA` | `true` | Ask Google for phone or desktop markup based on the requesting browser. |
 | `AIO_WAIT_MS` | `2500` | How long to wait for Google's overview to appear before serving. |
 
 ## Endpoints
@@ -189,6 +189,18 @@ All settings are environment variables, documented in `.env.example`. The ones y
   twenty placeholders whose URL only arrives in a later XHR; those keep their box (the gif is
   transparent, so the card holds its shape) and get `.galt-noimg`. Deleting them, as an earlier
   version did, collapsed the cards around them and was what made mobile results look mangled.
+- **The overview block carries other blocks' CSS.** Google ships a component's stylesheet at its
+  first use on the page, and the AI Overview is the first thing on the page, so its container holds
+  `<style>` elements (18KB on a mobile SERP) whose rules also style results much further down —
+  including the one that lays result thumbnails out in a row. Removing the block took them with it
+  and everything below the overview lost its layout. `rewrite.js` moves those `<style>` elements
+  back into the same spot in document order before the block goes.
+- **We send the form factor, not the client's UA.** `FORWARD_CLIENT_UA` reads the client's
+  User-Agent only to decide phone or desktop; the request itself always carries a Chrome UA,
+  because the engine here is Chromium. Passing a client UA through verbatim breaks on Firefox: the
+  UA contradicts the Chrome client hints Chromium sends, and Google answers with a bare template —
+  132KB with 19KB of CSS, no `#rso`, no results and no AI Overview, against 383KB with 187KB of CSS
+  and 7 results for the same query with a Chrome UA.
 - **Mobile markup is a different page.** With `FORWARD_CLIENT_UA=true` a phone gets Google's mobile
   SERP, which shares almost no structure with the desktop one: result titles are
   `div[role="heading"][aria-level="3"]` instead of `<h3>`, there is no `<cite>` at all (the address
