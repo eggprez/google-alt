@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { config } from './config.js';
-import { rewriteInPage } from './rewrite.js';
+import { rewriteInPage, AIO_SELECTOR } from './rewrite.js';
 import { Semaphore } from './semaphore.js';
 
 export const PLACEHOLDER_ID = 'galt-placeholder';
@@ -77,14 +77,10 @@ export async function fetchGoogle(googleUrl, opts = {}) {
       await applyClientEmulation(page, opts.clientUa, opts.acceptLanguage);
       await page.goto(googleUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForSelector('#rso, #search, #main, #captcha-form, form[action*="sorry"], [role="main"]', { timeout: 15000 }).catch(() => {});
-      // Google sometimes renders the AI Overview a beat after the results. Give it a moment.
+      // Google's overview container is usually in the initial HTML (even while it is still
+      // "Thinking"); give it a moment if it arrives late. We discard its content either way.
       if (config.aioWaitMs > 0) {
-        await page.waitForFunction(
-          () => Array.from(document.querySelectorAll('h1, h2, h3, [role="heading"]')).some((h) => /^\s*AI Overview\s*$/i.test(h.textContent || '')),
-          null,
-          { timeout: config.aioWaitMs },
-        ).catch(() => {});
-        // Let a rendered overview finish loading its content, then rewrite.
+        await page.waitForSelector(AIO_SELECTOR, { state: 'attached', timeout: config.aioWaitMs }).catch(() => {});
         await page.waitForTimeout(150);
       }
       const result = await page.evaluate(rewriteInPage, {

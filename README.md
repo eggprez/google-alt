@@ -1,12 +1,14 @@
-# google-alt
+# google-alt ("Boogle")
 
 Google search results, minus Google's AI Overview, plus a Claude Code overview in its place.
 
 A Docker container runs a real Chromium signed into your Google account. When you search through
 `search.bindel.glass`, the container loads Google's results page, removes Google's AI Overview block,
-and serves you the page with a placeholder that fills in with an overview written by headless Claude
-Code using its own web search. Everything else on the page is Google as normal, and result links go
-straight to the real sites in your own browser.
+and serves you the page with Google's wordmark swapped for a purple **Boogle**. The overview slot
+streams in an answer from headless Claude Code as it is written: first a quick draft from the top
+results on the page, then a verification pass with Claude's own web search that corrects and flags
+anything wrong. Everything else on the page is Google as normal, and result links go straight to the
+real sites in your own browser.
 
 Only the main web results page is proxied. Images, News, Maps, Shopping and friends link out to
 google.com, where you are signed in anyway.
@@ -28,15 +30,25 @@ google-alt container
 ```
 
 `/search` opens a fresh tab in the persistent Chromium, loads Google with the requesting browser's
-User-Agent (so Google sends mobile markup to phones), waits briefly for the AI Overview to render,
-then rewrites the DOM in place: overview block swapped for a placeholder, scripts stripped, URLs
-absolutized, tracking pings removed, web-search links pointed back at the proxy. The page is served
-with a small script that calls `/api/overview` and drops Claude's answer into the placeholder when
-it's ready. Queries where Google showed no overview get no Claude overview either.
+User-Agent (so Google sends mobile markup to phones), then rewrites the DOM in place: Google's
+overview band (found by its container, so the "Thinking" skeleton counts too) is removed and our
+block is inserted at the top of the results column, scripts are stripped, URLs absolutized,
+tracking pings removed, web-search links pointed back at the proxy, the logo replaced, and the top
+organic results (title, address, snippet) captured for the overview. A small page script restores
+what Google's scripts used to do: Enter submits the search box, and the More / Tools / time-range
+menus open. Queries where Google showed no overview get no Claude overview either.
 
-`/api/overview` runs `claude -p` with `--allowedTools WebSearch,WebFetch`, a JSON schema for
-`{answer, sources[]}`, and renders the markdown with numbered citation links. Results are cached
-per query for an hour by default.
+`/api/overview?q=…&stream=1` is a server-sent-events stream the page subscribes to:
+
+1. **Quick draft.** `claude -p` with no tools gets the query plus the captured top results and
+   writes an answer citing them by number. Text streams into the block as it is generated.
+2. **Verification.** A second run with `WebSearch`/`WebFetch` checks every claim. The header shows
+   what it is searching; when it finishes the block is marked **Verified**, or replaced with the
+   corrected answer under a **Corrected after checking the web** banner listing what changed.
+
+Without captured results (direct API call, or the page was served before a restart) Claude
+researches from scratch with its own search instead. Finished overviews are cached per query for
+an hour by default; the plain JSON form of the endpoint waits for the final result.
 
 ## Setup
 
@@ -123,7 +135,8 @@ All settings are environment variables, documented in `.env.example`. The ones y
 |---|---|---|
 | `CLAUDE_MODEL` | `sonnet` | Model for the overview. `opus` is slower and better. |
 | `OVERVIEW_CACHE_TTL_S` | `3600` | Reuse an overview for the same query. `0` disables. |
-| `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps per overview. |
+| `OVERVIEW_VERIFY` | `true` | Run the second, web-searching verification pass. `false` keeps only the quick draft. |
+| `OVERVIEW_MAX_TURNS` | `12` | Cap on search/fetch steps for the verification pass. |
 | `PROXY_SECRET` | empty | Require this value in an `X-Proxy-Secret` header on every request. |
 | `FORWARD_CLIENT_UA` | `true` | Ask Google for markup matching the requesting browser. |
 | `AIO_WAIT_MS` | `2500` | How long to wait for Google's overview to appear before serving. |
@@ -134,7 +147,8 @@ All settings are environment variables, documented in `.env.example`. The ones y
 |---|---|
 | `/` | Minimal search box, sign-in status, setup hints |
 | `/search?q=` | Proxied Google web results with Claude overview |
-| `/api/overview?q=` | JSON `{html, sources, ms, cached, cost}` |
+| `/api/overview?q=` | JSON `{html, sources, verification, mode, ms, cached, cost}` |
+| `/api/overview?q=&stream=1` | Server-sent events: `status`, `snapshot`, `quick`, `done`, `fail` |
 | `/vnc` | noVNC into the container's Chromium |
 | `/healthz` | Browser and cache status |
 | `/opensearch.xml` | OpenSearch descriptor for browser engine discovery |
@@ -146,9 +160,14 @@ All settings are environment variables, documented in `.env.example`. The ones y
 - On phones, Google loads some component CSS lazily via JavaScript, so a few sections (notably
   "People also ask") render plainer than on google.com. Results, links, and the overview are fine.
 - Google's page scripts are removed, so interactive widgets (expandable "People also ask", carousels,
-  the AI Mode tab) are static. Links all work.
-- AI Overview detection looks for a heading reading "AI Overview". If Google renames it, adjust
-  `findOverview()` in `src/rewrite.js`.
+  the AI Mode tab) are static. Links, the search box, and the More / Tools menus work.
+- AI Overview detection keys on Google's overview container (`AIO_SELECTOR` in `src/rewrite.js`),
+  with the "AI Overview" / "Thinking" heading as a fallback. If Google changes its markup, adjust
+  those. The menus rely on Google's `eBYPP` / `oYxtQd` / `H9P06b` / `xl07Ob` attribute names.
+- The verification pass roughly doubles the Claude usage per search. Set `OVERVIEW_VERIFY=false`
+  to keep only the quick draft (which never searches the web itself).
+- Server-sent events need an unbuffered reverse proxy; the shipped nginx configs set
+  `proxy_buffering off`, and the app also sends `X-Accel-Buffering: no`.
 - Claude Code's `--bare` mode is deliberately not used: it disables subscription OAuth.
 - Everything runs as the unprivileged `pwuser`. Chromium runs with `--no-sandbox` because it is
   inside a container; keep the container off the public internet (it is loopback-only in compose).
@@ -161,3 +180,7 @@ CLAUDE_CODE_OAUTH_TOKEN=... DATA_DIR=./data PUBLIC_ORIGIN=http://localhost:8080 
 ```
 
 Without Xvfb you'll want to set `headless: true` in `src/browser.js` temporarily, or just use Docker.
+
+To work on the page script or the overview UI without Chromium or Claude, `.scratch/` (git-ignored)
+can hold a dev server that serves a saved rewritten page through `injectPage()` and a fake `claude`
+that emits stream-json; see `src/api.js` for the event shapes.

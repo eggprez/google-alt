@@ -3,8 +3,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { config } from './config.js';
 import { fetchGoogle, browserStatus, closeBrowser, getContext, PLACEHOLDER_ID } from './browser.js';
-import { getOverview, cacheStats, claudeAuthStatus } from './overview.js';
-import { injectOverview } from './inject.js';
+import { cacheStats, claudeAuthStatus, rememberResults } from './overview.js';
+import { overviewHandler } from './api.js';
+import { injectPage } from './inject.js';
 import { homePage, errorPage, opensearchXml } from './pages.js';
 
 const app = express();
@@ -36,7 +37,7 @@ const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filte
 
 function isWebSearch(query) {
   if (query.tbm) return false;
-  if (query.udm && query.udm !== '14') return false;
+  if (query.udm && query.udm !== '14' && query.udm !== 'web') return false;
   return true;
 }
 
@@ -95,8 +96,8 @@ app.get('/search', async (req, res) => {
         showVnc: true,
       }));
     }
-    let html = result.html;
-    if (result.hadOverview) html = injectOverview(html, q, PLACEHOLDER_ID);
+    if (result.hadOverview) rememberResults(q, result.results);
+    const html = injectPage(result.html, { q, placeholderId: PLACEHOLDER_ID, hadOverview: result.hadOverview });
     res.set({
       'Cache-Control': 'private, no-store',
       'X-Robots-Tag': 'noindex, nofollow',
@@ -115,20 +116,7 @@ app.get('/search', async (req, res) => {
   }
 });
 
-app.get('/api/overview', async (req, res) => {
-  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  if (!q) return res.status(400).json({ error: 'missing q' });
-  const t0 = Date.now();
-  try {
-    const r = await getOverview(q);
-    log(`overview "${q}" ${Date.now() - t0}ms cached=${r.cached} cost=${r.cost ?? '?'} turns=${r.turns ?? '?'}`);
-    res.set('Cache-Control', 'private, no-store');
-    res.json({ html: r.html, sources: r.sources, ms: r.ms, cached: r.cached, cost: r.cost, model: r.model });
-  } catch (e) {
-    log('overview error', e.message);
-    res.status(502).json({ error: e.message });
-  }
-});
+app.get('/api/overview', overviewHandler);
 
 // noVNC for the one-time Google login. Only reachable through this app (and your SSO in front of it).
 app.get('/vnc', (req, res) => res.redirect(302, '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'));

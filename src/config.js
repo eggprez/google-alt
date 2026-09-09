@@ -17,6 +17,9 @@ export const config = {
     model: env.CLAUDE_MODEL || 'sonnet',
     maxTurns: int(env.OVERVIEW_MAX_TURNS, 12),
     timeoutMs: int(env.OVERVIEW_TIMEOUT_MS, 150000),
+    quickTimeoutMs: int(env.OVERVIEW_QUICK_TIMEOUT_MS, 60000),
+    // Second pass: verify the snippet-based draft with Claude's own web search.
+    verify: bool(env.OVERVIEW_VERIFY, true),
     cacheTtlS: int(env.OVERVIEW_CACHE_TTL_S, 3600),
     concurrency: int(env.OVERVIEW_CONCURRENCY, 2),
   },

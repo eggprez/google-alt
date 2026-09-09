@@ -1,6 +1,13 @@
 // Runs INSIDE the Google results page via page.evaluate. Must be self-contained.
-// Returns { blocked, hadOverview, html, title }.
+// Returns { blocked, hadOverview, results, html, title }.
+
+// Elements present in every state of Google's AI Overview, including the "Thinking" skeleton shown
+// while Google is still generating. The visible heading only reads "AI Overview" once it finished,
+// so it can't be the primary signal. Keep the literal inside rewriteInPage() in sync.
+export const AIO_SELECTOR = '[jscontroller="EYwa3d"][data-q], #m-x-content, #eKIzJc, div[data-attrid="AIOverview"]';
+
 export function rewriteInPage({ proxyOrigin, placeholderId }) {
+  const AIO = '[jscontroller="EYwa3d"][data-q], #m-x-content, #eKIzJc, div[data-attrid="AIOverview"]';
   const bodyText = (document.body && document.body.innerText || '').slice(0, 4000);
   const host = location.hostname;
 
@@ -14,40 +21,103 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     return { blocked: 'unexpected', title: document.title };
   }
 
-  const TOP_IDS = new Set(['rso', 'rcnt', 'center_col', 'search', 'main', 'res', 'topstuff', 'cnt', 'kp-wp-tab-overview']);
-  const isTop = (el) => !el || el === document.body || el === document.documentElement || TOP_IDS.has(el.id);
-  const containsResults = (el) => !!el.querySelector('#rso, #search, #center_col, #rcnt');
+  // Page landmarks the overview block must never swallow. Google renders the overview in a
+  // full-width band (#rcnt > div) that also holds the top ads slot (#tads), so we climb from an
+  // overview-specific anchor until the next step up would include one of these.
+  const LANDMARK_IDS = ['rso', 'search', 'res', 'center_col', 'rcnt', 'main', 'cnt', 'tads', 'tvcap', 'taw', 'topstuff', 'bottomads', 'botstuff', 'rhs', 'appbar', 'hdtb', 'searchform', 'tsf', 'kp-wp-tab-overview'];
+  const landmarks = LANDMARK_IDS.map((id) => document.getElementById(id)).filter(Boolean);
+  const isTop = (el) => !el || el === document.body || el === document.documentElement || LANDMARK_IDS.includes(el.id);
+  const holdsLandmark = (el) => landmarks.some((l) => l !== el && el.contains(l));
 
   function climb(start) {
     let el = start;
-    while (el.parentElement && !isTop(el.parentElement) && !containsResults(el.parentElement)) {
+    while (el.parentElement && !isTop(el.parentElement) && !holdsLandmark(el.parentElement)) {
       el = el.parentElement;
     }
-    if (isTop(el) || containsResults(el)) return null;
+    if (isTop(el) || holdsLandmark(el)) return null;
     return el;
   }
 
-  function findOverview() {
+  function findOverviewAnchor() {
+    const known = document.querySelector(AIO);
+    if (known) return known;
     const heads = Array.from(document.querySelectorAll('h1, h2, h3, [role="heading"], [aria-level]'));
-    const exact = heads.filter((h) => /^\s*AI Overview\s*$/i.test(h.textContent || ''));
-    const loose = heads.filter((h) => /^\s*AI Overview\b/i.test(h.textContent || ''));
-    for (const h of [...exact, ...loose]) {
-      const block = climb(h);
-      if (block) return block;
-    }
-    const known = document.querySelector('#m-x-content, div[data-attrid="AIOverview"], div[jscontroller][data-al]');
-    if (known) return climb(known) || known;
-    return null;
+    return heads.find((h) => /^\s*(AI Overview|Thinking)\s*$/i.test(h.textContent || ''))
+      || heads.find((h) => /^\s*AI Overview\b/i.test(h.textContent || ''))
+      || null;
   }
 
-  const overview = findOverview();
-  const hadOverview = !!overview;
-  if (overview) {
-    // Keep Google's container (its classes carry the layout width) and swap only its contents.
+  const anchor = findOverviewAnchor();
+  let hadOverview = false;
+  if (anchor) {
+    const block = climb(anchor) || anchor;
+    // Google's "no overview" notices are in the markup but hidden unless it gave up on the query.
+    const visible = (el) => {
+      for (let e = el; e && e !== block.parentElement; e = e.parentElement) {
+        if (/display\s*:\s*none/i.test(e.getAttribute('style') || '') || getComputedStyle(e).display === 'none') return false;
+      }
+      return true;
+    };
+    const unavailable = Array.from(block.querySelectorAll('span, div'))
+      .some((el) => el.children.length === 0 && /AI Overview is not available|Can't generate an AI overview/i.test(el.textContent || '') && visible(el));
+    hadOverview = !unavailable;
+
+    const rso = document.getElementById('rso');
+    const col = document.getElementById('center_col') || (rso && (rso.closest('#res, #search') || rso));
     const ph = document.createElement('div');
     ph.id = placeholderId;
-    overview.removeAttribute('style');
-    overview.replaceChildren(ph);
+    if (col && !col.contains(block)) {
+      // Google's band sits above the results column and gets its width from CSS that is loaded
+      // lazily by scripts we strip. Drop the band and put ours at the top of the results column,
+      // which is the same visual spot at the column's proper width.
+      block.remove();
+      if (hadOverview) {
+        let first = col.firstElementChild;
+        while (first && /^(STYLE|SCRIPT)$/.test(first.tagName)) first = first.nextElementSibling;
+        col.insertBefore(ph, first);
+      }
+    } else if (hadOverview) {
+      // Already inside the results column (Google sometimes places it after the first result).
+      block.removeAttribute('style');
+      block.replaceChildren(ph);
+    } else {
+      block.remove();
+    }
+  }
+
+  // Top organic results: the quick overview is drafted from these before Claude verifies it.
+  // Result links are direct URLs, /url?q= redirects, or opaque /goto?url= redirects; the <cite>
+  // breadcrumb carries the readable address in every case.
+  const results = [];
+  const seenUrls = new Set();
+  const googleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
+  for (const h3 of document.querySelectorAll('#rso h3, #search h3')) {
+    const a = h3.closest('a[href]') || (h3.parentElement && h3.parentElement.querySelector('a[href]'));
+    if (!a) continue;
+    let u;
+    try { u = new URL(a.getAttribute('href'), location.href); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol)) continue;
+    if (googleHost(u.hostname)) {
+      const target = u.pathname === '/url' && (u.searchParams.get('q') || u.searchParams.get('url'));
+      if (target) { try { u = new URL(target); } catch { continue; } }
+      else if (u.pathname !== '/goto') continue;
+    }
+    const item = h3.closest('.MjjYud, [data-hveid], .g') || h3.parentElement;
+    const title = (h3.innerText || h3.textContent || '').trim().slice(0, 200);
+    if (!title) continue;
+    const cite = a.querySelector('cite') || item.querySelector('cite');
+    const display = cite ? (cite.textContent || '').replace(/\s*›\s*/g, '/').replace(/\s+/g, '').trim() : '';
+    let host = '';
+    try { host = new URL(display.startsWith('http') ? display : 'https://' + display).hostname; } catch { /* no cite */ }
+    if (googleHost(u.hostname) && !host) continue;
+    const dedupe = display || u.href;
+    if (seenUrls.has(dedupe)) continue;
+    seenUrls.add(dedupe);
+    const sn = item.querySelector('.VwiC3b, [data-sncf], [data-content-feature="1"]');
+    let snippet = sn ? (sn.innerText || '') : (item.innerText || '').replace(title, '');
+    snippet = snippet.replace(/\s+/g, ' ').trim().slice(0, 400);
+    results.push({ title, url: u.href, display: display || u.href, host: host || u.hostname, snippet });
+    if (results.length >= 8) break;
   }
 
   // Strip everything that only works on google.com's origin.
@@ -76,21 +146,47 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   document.querySelectorAll('link[href]').forEach((el) => el.setAttribute('href', abs(el.getAttribute('href'))));
   document.querySelectorAll('form[action]').forEach((el) => el.setAttribute('action', abs(el.getAttribute('action'))));
 
-  // Search forms should post back to the proxy.
+  // Search forms post back to the proxy. Google's hidden tracking fields go; the locale ones stay.
+  const KEEP_HIDDEN = ['hl', 'gl', 'safe', 'lr', 'cr', 'tbs', 'num'];
   document.querySelectorAll('form').forEach((f) => {
     const action = f.getAttribute('action') || '';
     if (/\/search(\?|$)/.test(action) || f.querySelector('input[name="q"], textarea[name="q"]')) {
       f.setAttribute('action', proxyOrigin + '/search');
       f.setAttribute('method', 'get');
+      f.removeAttribute('data-submitfalse');
+      f.querySelectorAll('input[type="hidden"]').forEach((i) => {
+        if (!KEEP_HIDDEN.includes(i.name)) i.remove();
+      });
     }
   });
+
+  // Branding: Google's wordmark becomes Boogle, linking to the proxy's home page.
+  const LOGO = '<svg class="galt-logo" xmlns="http://www.w3.org/2000/svg" width="112" height="34" viewBox="0 0 112 34" role="img" aria-label="Boogle">'
+    + '<defs><linearGradient id="galt-logo-grad" x1="0" y1="0" x2="1" y2="0.6"><stop offset="0" stop-color="#5b21b6"/><stop offset="0.55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>'
+    + '<text x="1" y="27" textLength="109" lengthAdjust="spacingAndGlyphs" font-family="\'Google Sans\',\'Product Sans\',Poppins,\'Trebuchet MS\',Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.5" fill="url(#galt-logo-grad)">Boogle</text></svg>';
+  document.querySelectorAll('#logo, a[aria-label="Go to Google Home"], a[title="Go to Google Home"]').forEach((a) => {
+    a.innerHTML = LOGO;
+    a.setAttribute('href', proxyOrigin + '/');
+    a.setAttribute('aria-label', 'Boogle home');
+    a.setAttribute('title', 'Boogle home');
+    a.classList.add('galt-logo-link');
+  });
+  document.querySelectorAll('img[alt="Google"]').forEach((img) => {
+    const a = img.closest('a');
+    if (a && a.querySelector('.galt-logo')) return;
+    const span = document.createElement('span');
+    span.innerHTML = LOGO;
+    img.replaceWith(span.firstElementChild);
+    if (a) { a.setAttribute('href', proxyOrigin + '/'); a.classList.add('galt-logo-link'); }
+  });
+  document.title = document.title.replace(/\s*-\s*Google Search\s*$/i, ' - Boogle');
 
   const TRACKING = ['ved', 'ei', 'sa', 'sca_esv', 'sxsrf', 'biw', 'bih', 'dpr', 'source', 'sclient', 'uact', 'fbs', 'sqi', 'rlz', 'iflsig', 'gs_lp', 'gs_lcrp', 'gs_ssp'];
   const isGoogleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
   const isWebSearch = (u) => {
     if (u.searchParams.has('tbm')) return false;
     const udm = u.searchParams.get('udm');
-    if (udm && udm !== '14') return false;
+    if (udm && udm !== '14' && udm !== 'web') return false;
     return true;
   };
 
@@ -125,6 +221,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   return {
     blocked: null,
     hadOverview,
+    results,
     title: document.title,
     html: '<!DOCTYPE html>\n' + document.documentElement.outerHTML,
   };
