@@ -70,9 +70,8 @@ Images are published to `ghcr.io/eggprez/googlealt` by GitHub Actions on every p
 docker compose up -d
 ```
 
-If the package is private, `docker login ghcr.io` on the server first with a GitHub token that has
-`read:packages`. To build locally instead, uncomment `build: .` in `docker-compose.yml` and run
-`docker compose up -d --build`.
+The package is public, so no registry login is needed. To build locally instead, uncomment `build: .`
+in `docker-compose.yml` and run `docker compose up -d --build`.
 
 The app listens on host port `2039` (container port 8080). Check `curl localhost:2039/healthz`.
 
