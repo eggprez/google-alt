@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { chromium } from 'playwright';
 import { config } from './config.js';
 import { rewriteInPage, AIO_SELECTOR } from './rewrite.js';
@@ -12,11 +13,27 @@ const sem = new Semaphore(config.browserConcurrency);
 
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
+// Chromium marks a persistent profile as in use with these three files; SingletonLock records the
+// hostname and pid that hold it. A container that was killed (or replaced by a new image) leaves
+// them behind, and the new container has a different hostname, so every launch fails with "The
+// profile appears to be in use by another Chromium process". Only this process ever opens the
+// profile, so anything found here before a launch is stale.
+function clearProfileLocks(profileDir) {
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try {
+      fs.rmSync(path.join(profileDir, name), { force: true });
+    } catch (e) {
+      console.log(`could not remove stale ${name}: ${e.message}`);
+    }
+  }
+}
+
 export async function getContext() {
   if (context) return context;
   if (launching) return launching;
   launching = (async () => {
     const profileDir = path.join(config.dataDir, 'profile');
+    clearProfileLocks(profileDir);
     const ctx = await chromium.launchPersistentContext(profileDir, {
       headless: false,
       viewport: null,

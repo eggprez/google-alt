@@ -169,6 +169,11 @@ All settings are environment variables, documented in `.env.example`. The ones y
 - Server-sent events need an unbuffered reverse proxy; the shipped nginx configs set
   `proxy_buffering off`, and the app also sends `X-Accel-Buffering: no`.
 - Claude Code's `--bare` mode is deliberately not used: it disables subscription OAuth.
+- If Chromium ever refuses to start with "The profile appears to be in use by another Chromium
+  process ... on another computer", a killed container left its lock files in the volume. The app
+  now clears `SingletonLock`, `SingletonCookie` and `SingletonSocket` before every launch; on an
+  older image, remove them by hand:
+  `docker exec google-alt rm -f /data/profile/Singleton{Lock,Cookie,Socket}`
 - Everything runs as the unprivileged `pwuser`. Chromium runs with `--no-sandbox` because it is
   inside a container; keep the container off the public internet (it is loopback-only in compose).
 
