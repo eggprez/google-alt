@@ -84,7 +84,7 @@ async function applyClientEmulation(page, clientUa, acceptLanguage) {
 /**
  * Fetch a Google results page with the signed-in profile and return the rewritten HTML.
  * @param {URL} googleUrl
- * @param {{clientUa?: string, acceptLanguage?: string, expectOverview?: boolean}} opts
+ * @param {{clientUa?: string, acceptLanguage?: string}} opts
  */
 export async function fetchGoogle(googleUrl, opts = {}) {
   return sem.run(async () => {
@@ -96,8 +96,7 @@ export async function fetchGoogle(googleUrl, opts = {}) {
       await page.waitForSelector('#rso, #search, #main, #captcha-form, form[action*="sorry"], [role="main"]', { timeout: 15000 }).catch(() => {});
       // Google's overview container is usually in the initial HTML (even while it is still
       // "Thinking"); give it a moment if it arrives late. We discard its content either way.
-      // Only the web tab ever has one, so no other tab pays this wait.
-      if (config.aioWaitMs > 0 && opts.expectOverview !== false) {
+      if (config.aioWaitMs > 0) {
         await page.waitForSelector(AIO_SELECTOR, { state: 'attached', timeout: config.aioWaitMs }).catch(() => {});
         await page.waitForTimeout(150);
       }

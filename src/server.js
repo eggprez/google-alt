@@ -4,7 +4,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { config } from './config.js';
 import { fetchGoogle, browserStatus, closeBrowser, getContext, PLACEHOLDER_ID } from './browser.js';
 import { cacheStats, claudeAuthStatus, rememberResults } from './overview.js';
-import { overviewHandler, followupHandler } from './api.js';
+import { overviewHandler } from './api.js';
 import { injectPage } from './inject.js';
 import { homePage, errorPage, opensearchXml } from './pages.js';
 
@@ -32,22 +32,20 @@ app.use((req, res, next) => {
   res.status(403).type('text').send('Forbidden: missing or invalid X-Proxy-Secret');
 });
 
-// Params we forward to Google. Everything else (its tracking ids) is dropped. Every tab goes
-// through the proxy, so udm/tbm and the tab-specific filters travel with the query.
-const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filter', 'nfpr', 'spell', 'udm', 'tbm', 'oq', 'as_q', 'as_epq', 'as_oq', 'as_eq', 'as_sitesearch', 'as_filetype', 'ie', 'oe', 'imgsz', 'imgar', 'imgc', 'imgtype', 'chips', 'yv'];
+// Params we forward to Google for a web search. Everything else is dropped.
+const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filter', 'nfpr', 'spell', 'udm', 'oq', 'as_q', 'as_epq', 'as_oq', 'as_eq', 'as_sitesearch', 'as_filetype', 'ie', 'oe'];
 
-// Only the web tab can carry an AI Overview, so only it waits for Google's block to appear.
-function isWebTab(query) {
+function isWebSearch(query) {
   if (query.tbm) return false;
-  const udm = typeof query.udm === 'string' ? query.udm : '';
-  return !udm || udm === '14' || udm === '48';
+  if (query.udm && query.udm !== '14' && query.udm !== 'web') return false;
+  return true;
 }
 
-function buildGoogleUrl(query) {
+function buildGoogleUrl(query, all = false) {
   const u = new URL(`https://${config.googleDomain}/search`);
   for (const [k, v] of Object.entries(query)) {
     if (typeof v !== 'string') continue;
-    if (PASS.includes(k)) u.searchParams.set(k, v);
+    if (all || PASS.includes(k)) u.searchParams.set(k, v);
   }
   if (!u.searchParams.has('hl') && config.hl) u.searchParams.set('hl', config.hl);
   if (!u.searchParams.has('gl') && config.gl) u.searchParams.set('gl', config.gl);
@@ -73,15 +71,18 @@ app.get('/favicon.ico', (req, res) => res.redirect(302, `https://${config.google
 app.get('/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.redirect(302, '/');
+  if (!isWebSearch(req.query)) {
+    // Images, News, Maps, etc. are Google as normal.
+    return res.redirect(302, buildGoogleUrl(req.query, true).href);
+  }
   const googleUrl = buildGoogleUrl(req.query);
   const t0 = Date.now();
   try {
     const result = await fetchGoogle(googleUrl, {
       clientUa: req.get('user-agent'),
       acceptLanguage: req.get('accept-language'),
-      expectOverview: isWebTab(req.query),
     });
-    log(`search "${q}" tab=${result.tab || '?'} ${Date.now() - t0}ms overview=${result.hadOverview} blocked=${result.blocked || 'no'}`);
+    log(`search "${q}" ${Date.now() - t0}ms overview=${result.hadOverview} blocked=${result.blocked || 'no'}`);
     if (result.blocked) {
       const messages = {
         captcha: 'Google is asking the remote browser to prove it is not a robot.',
@@ -96,12 +97,7 @@ app.get('/search', async (req, res) => {
       }));
     }
     if (result.hadOverview) rememberResults(q, result.results);
-    const html = injectPage(result.html, {
-      q,
-      placeholderId: PLACEHOLDER_ID,
-      hadOverview: result.hadOverview,
-      chrome: result.chrome,
-    });
+    const html = injectPage(result.html, { q, placeholderId: PLACEHOLDER_ID, hadOverview: result.hadOverview });
     res.set({
       'Cache-Control': 'private, no-store',
       'X-Robots-Tag': 'noindex, nofollow',
@@ -121,7 +117,6 @@ app.get('/search', async (req, res) => {
 });
 
 app.get('/api/overview', overviewHandler);
-app.post('/api/followup', express.json({ limit: '64kb' }), followupHandler);
 
 // noVNC for the one-time Google login. Only reachable through this app (and your SSO in front of it).
 app.get('/vnc', (req, res) => res.redirect(302, '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'));
