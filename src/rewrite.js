@@ -130,11 +130,33 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   document.querySelectorAll('script, iframe, noscript, link[rel~="preload"], link[rel~="prefetch"], link[rel~="dns-prefetch"], link[rel~="preconnect"], link[rel~="modulepreload"], meta[http-equiv], base')
     .forEach((e) => e.remove());
 
-  // Lazy images.
+  // Lazy images. Most thumbnails on a results page — social posts, video stills, site logos,
+  // sports crests — ship as a 1x1 transparent gif, and the real URL lives somewhere only Google's
+  // scripts look at. We strip those scripts, so we have to apply the sources ourselves or the page
+  // arrives with no pictures at all. Two mechanisms cover nearly all of them:
+  //   img[data-src]        the URL sits on the element
+  //   google.ldi           an id -> URL map (values are protocol-relative), applied by _setImagesSrc
+  // Removing a <script> element does not undo what it already ran, so google.ldi is still here.
   document.querySelectorAll('img[data-src]').forEach((img) => img.setAttribute('src', img.getAttribute('data-src')));
   document.querySelectorAll('img[data-deferred][data-src], img[data-iurl]').forEach((img) => {
     const u = img.getAttribute('data-iurl');
     if (u) img.setAttribute('src', u);
+  });
+  const ldi = (window.google && window.google.ldi) || {};
+  for (const id of Object.keys(ldi)) {
+    const url = ldi[id];
+    if (typeof url !== 'string' || !url) continue;
+    const img = document.getElementById(id);
+    // Only fill in placeholders; never overwrite a picture Google already loaded.
+    if (!img || !img.tagName || img.tagName !== 'IMG') continue;
+    const cur = img.getAttribute('src') || '';
+    if (cur && !/^data:image\/gif/i.test(cur)) continue;
+    img.setAttribute('src', url);
+    img.removeAttribute('data-deferred');
+  }
+  // A placeholder we could not resolve would otherwise render as a 1x1 smudge.
+  document.querySelectorAll('img[src^="data:image/gif"]').forEach((img) => {
+    if (!img.getAttribute('data-src')) img.remove();
   });
 
   const abs = (v) => {
@@ -186,6 +208,24 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     if (a) { a.setAttribute('href', proxyOrigin + '/'); a.classList.add('galt-logo-link'); }
   });
   document.title = document.title.replace(/\s*-\s*Google Search\s*$/i, ' - Boogle');
+
+  // Google picks light or dark on the server, from the account setting — it ignores the viewer's
+  // prefers-color-scheme (verified: a SERP fetched with dark emulated still came back light, and
+  // the mobile SERP came back dark with light emulated). So the overview cannot follow the
+  // viewer's OS; it has to follow the page it is sitting in. Measure what Google actually sent.
+  function pageIsDark() {
+    const luminance = (el) => {
+      if (!el) return null;
+      const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/.exec(getComputedStyle(el).backgroundColor || '');
+      if (!m) return null;
+      if (m[4] !== undefined && Number(m[4]) === 0) return null; // fully transparent: keep looking
+      return (0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3])) / 255;
+    };
+    const l = luminance(document.body);
+    const v = l === null ? luminance(document.documentElement) : l;
+    return v !== null && v < 0.5;
+  }
+  if (pageIsDark()) document.documentElement.classList.add('galt-dark');
 
   const TRACKING = ['ved', 'ei', 'sa', 'sca_esv', 'sxsrf', 'biw', 'bih', 'dpr', 'source', 'sclient', 'uact', 'fbs', 'sqi', 'rlz', 'iflsig', 'gs_lp', 'gs_lcrp', 'gs_ssp', 'vsint', 'aep', 'ntc', 'cs'];
   const isGoogleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);

@@ -178,6 +178,20 @@ All settings are environment variables, documented in `.env.example`. The ones y
   "People also ask") render plainer than on google.com. Results, links, and the overview are fine.
 - Google's page scripts are removed, so interactive widgets (expandable "People also ask", carousels,
   the AI Mode tab) are static. Links, the search box, and the More / Tools menus work.
+- **Images.** Most thumbnails on a results page (social posts, video stills, site logos, sports
+  crests) ship as a 1x1 transparent gif; the real URL lives either on `img[data-src]` or in the
+  `google.ldi` map (element id -> protocol-relative URL) that Google's own script would apply.
+  Since we strip those scripts, `rewrite.js` applies both itself — without that the page arrives
+  with no pictures at all. Removing a `<script>` element does not undo what it already ran, so
+  `google.ldi` is still readable at that point. On a sample results page this took 135 unresolved
+  placeholders down to zero, with 6 unresolvable ones dropped. Scrolling first does not help:
+  Google's deferred loader will not re-fire for a synthetic scroll.
+- **Light or dark.** Google decides the SERP theme on the server, from the account setting, and
+  ignores the viewer's `prefers-color-scheme` (a page fetched with dark emulated still comes back
+  light; the mobile page came back dark with light emulated). So the overview block cannot follow
+  the viewer's OS or it ends up as a light card on a dark page. `rewrite.js` measures the
+  background luminance of the page Google actually sent and sets `html.galt-dark`, which is what
+  the block's dark palette keys off.
 - AI Overview detection keys on Google's overview container (`AIO_SELECTOR` in `src/rewrite.js`),
   with the "AI Overview" / "Thinking" heading as a fallback. If Google changes its markup, adjust
   those. The menus rely on Google's `eBYPP` / `oYxtQd` / `H9P06b` / `xl07Ob` attribute names.

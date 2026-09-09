@@ -4,7 +4,10 @@ export const PAGE_CSS = `
 .galt{--galt-bg:#f3f6fc;--galt-fg:#1f1f1f;--galt-muted:#5f6368;--galt-line:#dfe3ea;--galt-accent:#0b57d0;--galt-chip:#e8f0fe;--galt-purple:#7c3aed;
   box-sizing:border-box;margin:0 0 24px;padding:16px 18px;border-radius:20px;background:var(--galt-bg);color:var(--galt-fg);
   font-family:Google Sans,Roboto,Arial,sans-serif;font-size:15px;line-height:1.5;max-width:100%;overflow-wrap:anywhere}
-@media (prefers-color-scheme:dark){.galt{--galt-bg:#1f2125;--galt-fg:#e3e3e3;--galt-muted:#9aa0a6;--galt-line:#3c4043;--galt-accent:#a8c7fa;--galt-chip:#2c3a4d;--galt-purple:#c4b5fd}}
+/* Dark is decided by the page Google served (html.galt-dark, set in rewrite.js), never by the
+   viewer's prefers-color-scheme: Google ignores that, so following it would put a light card on a
+   dark page or the reverse. Colours match Google's own dark SERP. */
+html.galt-dark .galt{--galt-bg:#282a2f;--galt-fg:#e8e8e8;--galt-muted:#9aa0a6;--galt-line:#3f4145;--galt-accent:#99c3ff;--galt-chip:#35373d;--galt-purple:#c4b5fd}
 .galt *{box-sizing:border-box}
 /* Our own display rules would otherwise beat the UA stylesheet's [hidden] {display:none}. */
 .galt [hidden]{display:none!important}
@@ -39,11 +42,12 @@ export const PAGE_CSS = `
 .galt-flag ul{margin:6px 0 0;padding-left:18px}.galt-flag li{margin:2px 0}
 .galt-flag-corrected{background:#fef3c7;color:#713f12;border:1px solid #fcd34d}
 .galt-flag-muted{color:var(--galt-muted);background:transparent;border:1px dashed var(--galt-line)}
-@media (prefers-color-scheme:dark){.galt-flag-corrected{background:#3b2f0b;color:#fde68a;border-color:#a16207}}
+html.galt-dark .galt-flag-corrected{background:#3b2f0b;color:#fde68a;border-color:#a16207}
 .galt-v-verified .galt-phase{color:#188038}.galt-v-verified .galt-phase::before{content:"\\2713\\00a0"}
 .galt-v-corrected .galt-phase{color:#b45309}.galt-v-corrected .galt-phase::before{content:"\\26A0\\00a0"}
 .galt-v-unverified .galt-phase,.galt-v-failed .galt-phase{color:var(--galt-muted)}
-@media (prefers-color-scheme:dark){.galt-v-verified .galt-phase{color:#81c995}.galt-v-corrected .galt-phase{color:#fcd34d}}
+html.galt-dark .galt-v-verified .galt-phase{color:#81c995}
+html.galt-dark .galt-v-corrected .galt-phase{color:#fcd34d}
 .galt-retry{margin-top:8px;font-size:13px;color:var(--galt-accent);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
 .galt-body h3,.galt-body h4,.galt-body h5{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--galt-purple);margin:14px 0 6px}
 .galt-body>.galt-answer>p:first-child{font-size:16px;line-height:1.5;font-weight:500}
@@ -55,7 +59,7 @@ export const PAGE_CSS = `
 .galt-body th{background:var(--galt-chip);font-weight:600}
 /* What the fact-check rewrote, in its own colour. */
 .galt-fix{background:none;color:#b45309;font-weight:500;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
-@media (prefers-color-scheme:dark){.galt-fix{color:#fbbf24}}
+html.galt-dark .galt-fix{color:#fbbf24}
 .galt-fix *{color:inherit}
 /* Follow-up questions. */
 .galt-fu{margin-top:12px;padding-top:10px;border-top:1px dashed var(--galt-line)}
@@ -73,6 +77,25 @@ export const PAGE_CSS = `
   color:#fff;background:var(--galt-purple);font:inherit;font-size:15px;line-height:1}
 .galt-ask-go:hover{filter:brightness(1.1)}
 .galt-ask-busy .galt-ask-go{opacity:.5;pointer-events:none}
+/* Mobile. Google's mobile results column is full-bleed (375px wide, no padding) and each result
+   insets its own text by 16px, so a block with no margin sits edge-to-edge and lines up with
+   nothing. Match Google's inset and tighten the card. */
+@media (max-width:600px){
+  .galt{margin:8px 12px 20px;padding:14px 15px;border-radius:16px;font-size:14.5px}
+  .galt-head{gap:6px;margin-bottom:8px;font-size:12px}
+  .galt-badge{font-size:13px}
+  .galt-phase{max-width:100%;order:3;flex-basis:100%}
+  .galt-status{margin-left:auto}
+  .galt-body>.galt-answer>p:first-child,.galt-answer>p:first-child{font-size:15.5px}
+  .galt-body ul,.galt-body ol{padding-left:20px}
+  .galt-body table{font-size:13px}
+  .galt-body th,.galt-body td{padding:4px 6px}
+  .galt-flag{padding:8px 10px;font-size:12.5px}
+  .galt-sources ol{padding-left:18px}
+  .galt-src-host{display:block;margin-left:0}
+  .galt-ask{margin-top:10px;padding-left:10px}
+  .galt-ask-input{font-size:16px}
+}
 /* Google loads some component CSS lazily via JS, which we strip. Unsized inline icons otherwise fill the viewport. */
 svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
 /* Boogle wordmark */
@@ -85,8 +108,8 @@ svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
 .galt-menu-portal a{display:block;padding:10px 16px;color:inherit;text-decoration:none;white-space:nowrap}
 .galt-menu-portal a:hover{background:rgba(60,64,67,.08)}
 .galt-menu-portal [role="button"]{cursor:pointer;padding:10px 16px;white-space:nowrap}
-@media (prefers-color-scheme:dark){.galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1px 3px rgba(0,0,0,.5),0 4px 8px 3px rgba(0,0,0,.3)}
-  .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}}
+html.galt-dark .galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1px 3px rgba(0,0,0,.5),0 4px 8px 3px rgba(0,0,0,.3)}
+html.galt-dark .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}
 `;
 
 // Runs on every proxied results page. Restores the bits of Google's UI that its scripts drove.
