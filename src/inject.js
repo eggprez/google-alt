@@ -114,6 +114,9 @@ html.galt-dark .galt-noimg{background:rgba(255,255,255,.06)}
 .galt-menu-portal [role="button"]{cursor:pointer;padding:10px 16px;white-space:nowrap}
 html.galt-dark .galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1px 3px rgba(0,0,0,.5),0 4px 8px 3px rgba(0,0,0,.3)}
 html.galt-dark .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}
+/* Controls the page script drives: the precise-location chip and "People also ask" questions. */
+[data-galt-geo],[data-galt-paa]{cursor:pointer}
+[data-galt-geo="busy"]{opacity:.6;pointer-events:none}
 `;
 
 // Runs on every proxied results page. Restores the bits of Google's UI that its scripts drove.
@@ -176,6 +179,46 @@ export const PAGE_SCRIPT = `
   });
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeMenus(); });
   window.addEventListener('scroll', function(){ closeMenus(); }, { passive: true });
+
+  // Precise location. Google's own chip asked the device for its position and reloaded; we do the
+  // same, but the coordinates go into a cookie that the server turns into Google's uule parameter
+  // on every search (see geo.js). Once opted in, each page load refreshes the stored position in
+  // the background (no prompt: the permission is already granted), so the next search uses where
+  // the phone is now. Clearing the site's cookies turns it off.
+  var GEO = 'galt_geo', GEO_DAYS = 30;
+  function hasGeo(){ return document.cookie.split(/;\s*/).some(function(c){ return c.indexOf(GEO + '=') === 0; }); }
+  function storeGeo(pos){
+    var c = pos.coords, v = [c.latitude.toFixed(6), c.longitude.toFixed(6), Math.round(c.accuracy || 0), Date.now()].join(',');
+    document.cookie = GEO + '=' + encodeURIComponent(v) + ';path=/;max-age=' + (GEO_DAYS * 86400) + ';samesite=lax' + (location.protocol === 'https:' ? ';secure' : '');
+  }
+  function locate(ok, err, opts){
+    if (!navigator.geolocation) { err(new Error('no geolocation')); return; }
+    navigator.geolocation.getCurrentPosition(ok, err, opts || { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  }
+  document.addEventListener('click', function(e){
+    var chip = e.target.closest('[data-galt-geo="use"]'); if (!chip) return;
+    e.preventDefault();
+    var label = chip.querySelector('.sjVJQd') || chip, was = label.textContent;
+    chip.setAttribute('data-galt-geo', 'busy'); label.textContent = 'Locating\u2026';
+    locate(function(pos){
+      storeGeo(pos);
+      label.textContent = 'Reloading\u2026';
+      location.reload();
+    }, function(er){
+      chip.setAttribute('data-galt-geo', 'use');
+      label.textContent = er && er.code === 1 ? 'Location blocked in browser' : 'Location unavailable';
+      setTimeout(function(){ label.textContent = was; }, 3000);
+    });
+  });
+  if (hasGeo()) locate(storeGeo, function(){}, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+
+  // "People also ask": the answer is fetched by Google's script when the question is expanded,
+  // so there is nothing here to unfold. Tapping a question searches for it instead.
+  document.addEventListener('click', function(e){
+    var q = e.target.closest('[data-galt-paa]'); if (!q) return;
+    e.preventDefault();
+    location.href = '/search?q=' + encodeURIComponent(q.getAttribute('data-galt-paa'));
+  });
 })();
 `;
 

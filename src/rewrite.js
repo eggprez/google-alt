@@ -156,6 +156,28 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     if (results.length >= 8) break;
   }
 
+  // Precise location. Google's scripts opened a "See results closer to you?" modal (with a
+  // full-page scrim) on local queries before we took the snapshot, and without those scripts
+  // nothing can close it, so the phone got a page stuck behind a dialog whose buttons did
+  // nothing. Drop the modal, its scrim, and the hidden "learn more" sheet; keep the inline
+  // "Use precise location" chip in the location bar and mark it so the page script can drive
+  // it (it asks the device for coordinates and reloads, see inject.js).
+  document.querySelectorAll('[role="dialog"]').forEach((d) => {
+    if (/precise location/i.test(d.textContent || '')) d.remove();
+  });
+  document.querySelectorAll('.os-s').forEach((e) => e.remove());
+  document.querySelectorAll('[role="button"]').forEach((b) => {
+    if (/^\s*Use precise location\s*$/i.test(b.textContent || '')) b.setAttribute('data-galt-geo', 'use');
+  });
+
+  // "People also ask" answers are not in the page: each one is fetched when Google's script
+  // expands the question, so the pairs arrive holding a "Generating" skeleton (or "An error has
+  // occurred"). Mark them so the page script can turn a tap into a search for the question.
+  document.querySelectorAll('.related-question-pair[data-q]').forEach((p) => {
+    const b = p.querySelector('[role="button"][aria-controls]');
+    if (b) b.setAttribute('data-galt-paa', p.getAttribute('data-q'));
+  });
+
   // Strip everything that only works on google.com's origin.
   document.querySelectorAll('script, iframe, noscript, link[rel~="preload"], link[rel~="prefetch"], link[rel~="dns-prefetch"], link[rel~="preconnect"], link[rel~="modulepreload"], meta[http-equiv], base')
     .forEach((e) => e.remove());

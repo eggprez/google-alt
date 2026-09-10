@@ -35,7 +35,8 @@ google-alt container
 ```
 
 `/search` opens a fresh tab in the persistent Chromium, loads Google with the requesting browser's
-User-Agent (so Google sends mobile markup to phones), then rewrites the DOM in place: Google's
+User-Agent (so Google sends mobile markup to phones) and, when the phone has shared its position,
+a `uule` parameter carrying the coordinates, then rewrites the DOM in place: Google's
 overview band (found by its container, so the "Thinking" skeleton counts too) is removed and our
 block is inserted at the top of the results column, scripts are stripped, URLs absolutized,
 tracking pings removed, every Google search link pointed back at the proxy, the logo replaced, and
@@ -176,8 +177,18 @@ All settings are environment variables, documented in `.env.example`. The ones y
   the technical sense; at single-user volumes it looks like a person using Chrome, because it is.
 - On phones, Google loads some component CSS lazily via JavaScript, so a few sections (notably
   "People also ask") render plainer than on google.com. Results, links, and the overview are fine.
-- Google's page scripts are removed, so interactive widgets (expandable "People also ask", carousels,
-  the AI Mode tab) are static. Links, the search box, and the More / Tools menus work.
+- Google's page scripts are removed, so interactive widgets (carousels, the AI Mode tab) are
+  static. Links, the search box, and the More / Tools menus work. "People also ask" answers are not
+  in the page at all (Google fetches each one when you expand it), so tapping a question runs a
+  search for it instead of unfolding nothing.
+- **Precise location.** Google places you by the container's IP until told otherwise. The
+  "Use precise location" chip in the location bar under the tabs asks your phone for its position
+  (the browser's own permission prompt), stores it in a `galt_geo` cookie on the proxy, and reloads.
+  From then on every search carries the coordinates to Google as its `uule` parameter, which is
+  what makes local results say "1.8 mi" and the location bar name your neighbourhood. Each page
+  load refreshes the stored position in the background, so the next search uses where you are now.
+  Clearing the site's cookies turns it off. Google's own "See results closer to you?" modal is
+  removed from the page: with its scripts gone nothing could close it, and its buttons did nothing.
 - **Images.** Most thumbnails on a results page (social posts, video stills, site logos, sports
   crests) ship as a 1x1 transparent gif; the real URL lives either on `img[data-src]` or in the
   `google.ldi` map (element id -> protocol-relative URL) that Google's own script would apply.

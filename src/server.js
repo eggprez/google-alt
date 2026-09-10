@@ -9,6 +9,7 @@ import { cacheStats, claudeAuthStatus, rememberResults } from './overview.js';
 import { overviewHandler, followupHandler } from './api.js';
 import { injectPage } from './inject.js';
 import { homePage, errorPage, opensearchXml } from './pages.js';
+import { parseGeoCookie, uuleFor } from './geo.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -69,7 +70,7 @@ function isWebTab(query) {
   return !udm || udm === '14' || udm === '48';
 }
 
-function buildGoogleUrl(query) {
+function buildGoogleUrl(query, geo) {
   const u = new URL(`https://${config.googleDomain}/search`);
   for (const [k, v] of Object.entries(query)) {
     if (typeof v !== 'string') continue;
@@ -77,6 +78,8 @@ function buildGoogleUrl(query) {
   }
   if (!u.searchParams.has('hl') && config.hl) u.searchParams.set('hl', config.hl);
   if (!u.searchParams.has('gl') && config.gl) u.searchParams.set('gl', config.gl);
+  // The device's coordinates, when the page script has stored them (see geo.js).
+  if (geo) u.searchParams.set('uule', uuleFor(geo));
   return u;
 }
 
@@ -99,7 +102,8 @@ app.get('/favicon.ico', (req, res) => res.redirect(302, `https://${config.google
 app.get('/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.redirect(302, '/');
-  const googleUrl = buildGoogleUrl(req.query);
+  const geo = parseGeoCookie(req.headers.cookie);
+  const googleUrl = buildGoogleUrl(req.query, geo);
   const t0 = Date.now();
   try {
     const result = await fetchGoogle(googleUrl, {
@@ -107,7 +111,7 @@ app.get('/search', async (req, res) => {
       acceptLanguage: req.get('accept-language'),
       expectOverview: isWebTab(req.query),
     });
-    log(`search "${q}" tab=${result.tab || '?'} ${Date.now() - t0}ms overview=${result.hadOverview} blocked=${result.blocked || 'no'}`);
+    log(`search "${q}" tab=${result.tab || '?'} ${Date.now() - t0}ms overview=${result.hadOverview} geo=${geo ? 'precise' : 'ip'} blocked=${result.blocked || 'no'}`);
     if (result.blocked) {
       const messages = {
         captcha: 'Google is asking the remote browser to prove it is not a robot.',
