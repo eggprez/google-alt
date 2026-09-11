@@ -169,6 +169,14 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   document.querySelectorAll('[role="button"]').forEach((b) => {
     if (/^\s*Use precise location\s*$/i.test(b.textContent || '')) b.setAttribute('data-galt-geo', 'use');
   });
+  // The footer's "Update location" button does the same job from the bottom of the page. Its
+  // label is a bare text node followed by hidden spans (the "Can't update your location"
+  // snackbar), so it is matched by element, not by text. Google's mobile page keeps the whole
+  // footer hidden until its infinite scroll runs out of results, which never happens here (a
+  // "More search results" button stands in for the scroll), so show it where Google would.
+  document.querySelectorAll('update-location [role="button"]').forEach((b) => b.setAttribute('data-galt-geo', 'use'));
+  const sfooter = document.getElementById('sfooter');
+  if (sfooter) sfooter.style.removeProperty('display');
 
   // "People also ask" answers are not in the page: each one is fetched when Google's script
   // expands the question, so the pairs arrive holding a "Generating" skeleton (or "An error has
@@ -177,6 +185,52 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     const b = p.querySelector('[role="button"][aria-controls]');
     if (b) b.setAttribute('data-galt-paa', p.getAttribute('data-q'));
   });
+
+  // Stock chart periods. The 1D/5D/1M... buttons and the 1Y/5Y/Max options in the "More" menu
+  // redraw the chart from data Google's script fetches, so without it they did nothing. Google
+  // Finance draws the same chart for the same periods from its URL (?window=5D), and the widget
+  // already links there ("More about Apple Inc"), so a tap opens that page at the chosen period.
+  const WINDOWS = { '1d': '1D', '5d': '5D', '1m': '1M', '6m': '6M', ytd: 'YTD', '1y': '1Y', '5y': '5Y', '40y': 'MAX', max: 'MAX' };
+  const quoteLinkFor = (el) => {
+    for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) {
+      const a = e.querySelector('a[href*="google.com/finance/quote/"]');
+      if (a) return a;
+    }
+    return null;
+  };
+  document.querySelectorAll('[data-period]').forEach((el) => {
+    if (!/^(button|option|tab)$/.test(el.getAttribute('role') || '')) return;
+    const a = quoteLinkFor(el);
+    if (!a) return;
+    let quote;
+    try { quote = new URL(a.getAttribute('href'), location.href); } catch { return; }
+    const period = el.getAttribute('data-period') || '';
+    const win = WINDOWS[period.toLowerCase()] || period.toUpperCase();
+    el.setAttribute('data-galt-fin', quote.origin + quote.pathname + '?window=' + encodeURIComponent(win));
+    el.setAttribute('tabindex', '0');
+  });
+
+  // Collapsed sections whose content is already in the page: "Also in the news" under a stock,
+  // the earnings rows, the "Quarterly financials" and "Earnings" chips. Google's script showed
+  // the panel on tap; nothing does now. Mark the ones whose panel holds real content (a PAA
+  // "Generating" skeleton is not content: those became searches above) so the page script can
+  // open and close them. The menus the page script already drives are left alone, and so is the
+  // mobile "Search tools" row (#hdtbMenus): its filters are laid out by CSS that never arrives.
+  let panelSeq = 0;
+  const markToggle = (btn, panel) => {
+    if (!panel || panel.id === 'hdtbMenus' || btn.hasAttribute('data-galt-paa')) return;
+    if (btn.matches('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls')) return;
+    if (panel.querySelector('[role="progressbar"]') || !(panel.textContent || '').trim()) return;
+    // Only panels hidden outright. The desktop financials chips park their table as an invisible
+    // popover (position:absolute, sized by Google's script to overlay the neighbours); shown in
+    // the flow of its 204px card it does not fit, so those stay as they were.
+    if (getComputedStyle(panel).display !== 'none') return;
+    if (!panel.id) panel.id = 'galt-panel-' + (++panelSeq);
+    btn.setAttribute('data-galt-toggle', panel.id);
+    btn.setAttribute('aria-expanded', 'false');
+  };
+  document.querySelectorAll('[role="button"][aria-controls]').forEach((b) => markToggle(b, document.getElementById(b.getAttribute('aria-controls'))));
+  document.querySelectorAll('[jscontroller="qWD4e"][role="button"]').forEach((b) => markToggle(b, b.parentElement && b.parentElement.querySelector(':scope > .ZfqtA')));
 
   // Product tiles ("Popular products" and the like) are divs with no link at all: Google's script
   // opens a product panel on click, fetched from a product id the tile carries. Without the
@@ -393,6 +447,15 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
       // google.com is what used to bring Google's own AI Overview back when you switched to
       // Images and came back.
       if (u.pathname === '/search' && (u.searchParams.has('q') || u.searchParams.has('udm'))) {
+        // AI Mode (udm=50) is Google's own chat answer, which this proxy replaces. Its tab goes;
+        // the "Ask anything in AI Mode" suggestions elsewhere become ordinary searches.
+        // A tab is a list item holding nothing but the link (the mobile page carries a second,
+        // hidden copy of the strip whose list has no role, so the item is recognised by content).
+        if (u.searchParams.get('udm') === '50') {
+          const li = a.closest('[role="listitem"]');
+          if (li && (li.textContent || '').trim() === (a.textContent || '').trim()) { li.remove(); return; }
+          u.searchParams.delete('udm');
+        }
         TRACKING.forEach((k) => u.searchParams.delete(k));
         a.setAttribute('href', proxyOrigin + '/search?' + u.searchParams.toString());
         return;

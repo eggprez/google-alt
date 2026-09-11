@@ -97,7 +97,9 @@ html.galt-dark .galt-fix{color:#fbbf24}
   .galt-ask-input{font-size:16px}
 }
 /* Google loads some component CSS lazily via JS, which we strip. Unsized inline icons otherwise fill the viewport. */
-svg:not([width]):not([height]):not(.galt *){max-width:24px;max-height:24px}
+/* The stock chart's SVGs are sized by Google's CSS from their container and have no width attribute
+   either; clamping those drew the chart as a 24px squiggle. */
+svg:not([width]):not([height]):not(.galt *):not([data-attrid="Chart"] *){max-width:24px;max-height:24px}
 /* Boogle wordmark */
 .galt-logo-link{display:inline-flex;align-items:center;text-decoration:none}
 .galt-logo{display:block;max-width:none;max-height:none}
@@ -111,12 +113,17 @@ html.galt-dark .galt-noimg{background:rgba(255,255,255,.06)}
   background:#fff;color:#1f1f1f;border-radius:8px;box-shadow:0 1px 3px rgba(60,64,67,.3),0 4px 8px 3px rgba(60,64,67,.15);overflow:hidden!important;padding:6px 0;font-family:Google Sans,Roboto,Arial,sans-serif;font-size:14px}
 .galt-menu-portal a{display:block;padding:10px 16px;color:inherit;text-decoration:none;white-space:nowrap}
 .galt-menu-portal a:hover{background:rgba(60,64,67,.08)}
-.galt-menu-portal [role="button"]{cursor:pointer;padding:10px 16px;white-space:nowrap}
+.galt-menu-portal [role="button"],.galt-menu-portal [role="option"]{cursor:pointer;padding:10px 16px;white-space:nowrap}
 html.galt-dark .galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1px 3px rgba(0,0,0,.5),0 4px 8px 3px rgba(0,0,0,.3)}
 html.galt-dark .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}
-/* Controls the page script drives: the precise-location chip and "People also ask" questions. */
-[data-galt-geo],[data-galt-paa],[data-galt-shop]{cursor:pointer}
+/* Controls the page script drives: the location buttons, "People also ask" questions, product
+   tiles, stock chart periods and collapsed sections. */
+[data-galt-geo],[data-galt-paa],[data-galt-shop],[data-galt-fin],[data-galt-toggle]{cursor:pointer}
 [data-galt-geo="busy"]{opacity:.6;pointer-events:none}
+[data-galt-toggle][aria-expanded="true"] .aj35ze,[data-galt-toggle][aria-expanded="true"] .on8I6{transform:rotate(180deg)}
+/* An opened card in a grid of cards (the financials chips sit two abreast) takes the whole row,
+   as it does on google.com; its table did not fit half of one. */
+.galt-open{grid-column:1 / -1}
 `;
 
 // Runs on every proxied results page. Restores the bits of Google's UI that its scripts drove.
@@ -142,9 +149,11 @@ export const PAGE_SCRIPT = `
 
   // Dropdown menus: a [jscontroller=eBYPP] holds a trigger ([jsname=oYxtQd]) and a hidden panel
   // ([jsname=H9P06b]) whose child ([jsname=xl07Ob]) is the menu. The Tools button (#hdtb-tls)
-  // opens the panel that lives in #hdtb. Open menus are moved to <body> and positioned by hand.
+  // opens the panel that lives in #hdtb. A listbox combobox (the stock chart's "More" periods)
+  // keeps its panel as a sibling. Open menus are moved to <body> and positioned by hand.
   function panelFor(t){
     if (t.id === 'hdtb-tls') return document.querySelector('#hdtb [jsname="H9P06b"]');
+    if (t.getAttribute('aria-haspopup') === 'listbox') return t.parentElement && t.parentElement.querySelector(':scope > [jsname="H9P06b"]');
     var c = t.closest('[jscontroller="eBYPP"]');
     return c && c.querySelector(':scope > [jsname="H9P06b"]');
   }
@@ -160,7 +169,7 @@ export const PAGE_SCRIPT = `
     document.querySelectorAll('.galt-menu-portal').forEach(function(m){ if (chain.indexOf(m.__galtPanel) < 0) closeMenu(m.__galtPanel); });
   }
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls');
+    var t = e.target.closest('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls, [role="combobox"][aria-haspopup="listbox"]');
     if (!t) { if (!e.target.closest('.galt-menu-portal')) closeMenus(); return; }
     var panel = panelFor(t); if (!panel) return;
     e.preventDefault();
@@ -195,19 +204,27 @@ export const PAGE_SCRIPT = `
     if (!navigator.geolocation) { err(new Error('no geolocation')); return; }
     navigator.geolocation.getCurrentPosition(ok, err, opts || { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   }
+  // The button's label is its first text: a <span> in the location bar's chip, a bare text node
+  // followed by hidden snackbar markup in the footer's "Update location". Swap just that text.
+  function labelNode(el){
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) { if (n.nodeValue.trim()) return n; }
+    return null;
+  }
   document.addEventListener('click', function(e){
     var chip = e.target.closest('[data-galt-geo="use"]'); if (!chip) return;
     e.preventDefault();
-    var label = chip.querySelector('.sjVJQd') || chip, was = label.textContent;
-    chip.setAttribute('data-galt-geo', 'busy'); label.textContent = 'Locating\u2026';
+    var label = labelNode(chip), was = label ? label.nodeValue : '';
+    var say = function(t){ if (label) label.nodeValue = t; };
+    chip.setAttribute('data-galt-geo', 'busy'); say('Locating\u2026');
     locate(function(pos){
       storeGeo(pos);
-      label.textContent = 'Reloading\u2026';
+      say('Reloading\u2026');
       location.reload();
     }, function(er){
       chip.setAttribute('data-galt-geo', 'use');
-      label.textContent = er && er.code === 1 ? 'Location blocked in browser' : 'Location unavailable';
-      setTimeout(function(){ label.textContent = was; }, 3000);
+      say(er && er.code === 1 ? 'Location blocked in browser' : 'Location unavailable');
+      setTimeout(function(){ say(was); }, 3000);
     });
   });
   if (hasGeo()) locate(storeGeo, function(){}, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
@@ -234,6 +251,39 @@ export const PAGE_SCRIPT = `
     if (e.key !== 'Enter') return;
     var t = e.target.closest && e.target.closest('[data-galt-shop]'); if (!t) return;
     e.preventDefault(); shopSearch(t);
+  });
+
+  // Stock chart periods (see rewrite.js): the chart at that period is on Google Finance.
+  document.addEventListener('click', function(e){
+    var p = e.target.closest('[data-galt-fin]'); if (!p) return;
+    e.preventDefault(); location.href = p.getAttribute('data-galt-fin');
+  });
+
+  // Collapsed sections whose content is in the page ("Also in the news", earnings rows, the
+  // financials chips): open and close them.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-galt-toggle]'); if (!b) return;
+    var panel = document.getElementById(b.getAttribute('data-galt-toggle')); if (!panel) return;
+    e.preventDefault();
+    var open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.style.display = open ? 'block' : 'none';
+    // The card holding the button, when it sits in a grid of such cards (the financials chips,
+    // two abreast on a phone): span the row while open so the table has room.
+    for (var cell = b, i = 0; cell.parentElement && i < 6; cell = cell.parentElement, i++) {
+      var grid = cell.parentElement;
+      if (getComputedStyle(grid).display !== 'grid') continue;
+      var allCards = Array.prototype.every.call(grid.children, function(c){ return c.querySelector('[data-galt-toggle]'); });
+      if (allCards) cell.classList.toggle('galt-open', open);
+      break;
+    }
+  });
+
+  // Enter and Space activate those controls the way they would a button.
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var el = e.target.closest && e.target.closest('[data-galt-fin], [data-galt-toggle], [data-galt-paa], [data-galt-geo="use"]'); if (!el) return;
+    e.preventDefault(); el.click();
   });
 })();
 `;

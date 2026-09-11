@@ -178,18 +178,35 @@ All settings are environment variables, documented in `.env.example`. The ones y
   the technical sense; at single-user volumes it looks like a person using Chrome, because it is.
 - On phones, Google loads some component CSS lazily via JavaScript, so a few sections (notably
   "People also ask") render plainer than on google.com. Results, links, and the overview are fine.
-- Google's page scripts are removed, so interactive widgets (carousels, the AI Mode tab) are
-  static. Links, the search box, and the More / Tools menus work. "People also ask" answers are not
-  in the page at all (Google fetches each one when you expand it), so tapping a question runs a
-  search for it instead of unfolding nothing.
+- Google's page scripts are removed, so interactive widgets (carousels) are static. Links, the
+  search box, and the More / Tools menus work. "People also ask" answers are not in the page at
+  all (Google fetches each one when you expand it), so tapping a question runs a search for it
+  instead of unfolding nothing. The AI Mode tab is removed (it is Google's own chat answer, which
+  this proxy replaces); "Ask anything in AI Mode" suggestions elsewhere become ordinary searches.
+- **Stock widget.** The chart's period buttons (1D, 5D, 1M, 6M, YTD and the 1Y / 5Y / Max menu)
+  redraw the chart from data Google's script fetches, so without it they did nothing. Google
+  Finance draws the same chart for the same periods from its URL, and the widget already links
+  there ("More about Apple Inc"), so a tap opens `google.com/finance/quote/AAPL:NASDAQ?window=5D`
+  at the chosen period (`data-galt-fin`, from Google's `data-period` attribute). Collapsed
+  sections whose content is already in the page ("Also in the news", the earnings rows, the
+  "Quarterly financials" / "Earnings" chips on a phone) open and close in place (`data-galt-toggle`
+  on any `[aria-controls]` button whose panel is hidden and holds real content). The desktop
+  financials chips park their table as an invisible popover Google's script would size; those
+  are left as they were. The chart itself was drawn as a 24px squiggle because its SVGs have no
+  width attribute and were caught by the rule that clamps Google's unsized inline icons; the
+  chart is exempt now.
 - **Precise location.** Google places you by the container's IP until told otherwise. The
-  "Use precise location" chip in the location bar under the tabs asks your phone for its position
-  (the browser's own permission prompt), stores it in a `galt_geo` cookie on the proxy, and reloads.
+  "Use precise location" chip in the location bar under the tabs, and the "Update location" button
+  in the page footer, ask your phone for its position
+  (the browser's own permission prompt), store it in a `galt_geo` cookie on the proxy, and reload.
   From then on every search carries the coordinates to Google as its `uule` parameter, which is
   what makes local results say "1.8 mi" and the location bar name your neighbourhood. Each page
   load refreshes the stored position in the background, so the next search uses where you are now.
   Clearing the site's cookies turns it off. Google's own "See results closer to you?" modal is
   removed from the page: with its scripts gone nothing could close it, and its buttons did nothing.
+  Google's mobile page ships the footer with an inline `display:none` and only shows it once its
+  infinite scroll runs out of results; here a "More search results" button stands in for the
+  scroll, so the footer is shown under it, where the "Update location" button lives.
 - **Images.** Most thumbnails on a results page (social posts, video stills, site logos, sports
   crests) ship as a 1x1 transparent gif; the real URL lives either on `img[data-src]` or in the
   `google.ldi` map (element id -> protocol-relative URL) that Google's own script would apply.
