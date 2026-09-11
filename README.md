@@ -167,6 +167,7 @@ All settings are environment variables, documented in `.env.example`. The ones y
 | `/api/overview?q=` | JSON `{html, sources, verification, mode, ms, cached, cost}`. `&stream=1` for SSE, `&refresh=1` to bypass the cache |
 | `POST /api/followup` | `{q, question, history}` → SSE `status` / `snapshot` / `done` / `fail` |
 | `/api/overview?q=&stream=1` | Server-sent events: `status`, `snapshot`, `quick`, `done`, `fail` |
+| `/go?u=` | Follows a Google ad-click (`/aclk`) or opaque result (`/goto`) redirect on the server and sends the browser to the destination |
 | `/vnc` | noVNC into the container's Chromium |
 | `/healthz` | Browser and cache status |
 | `/opensearch.xml` | OpenSearch descriptor for browser engine discovery |
@@ -230,6 +231,13 @@ All settings are environment variables, documented in `.env.example`. The ones y
   those. The menus rely on Google's `eBYPP` / `oYxtQd` / `H9P06b` / `xl07Ob` attribute names.
 - Proxying every tab means an image or news click costs a Chromium page load and one more request
   to Google from your IP, where it used to be a redirect to google.com.
+- Sponsored results link to `google.com/aclk` (or `googleadservices.com/pagead/aclk`) and some
+  organic results to `google.com/goto?url=<opaque blob>`; Google 302s both to the real site. Those
+  are rewritten to `/go?u=…`, and the server follows the redirect itself (`src/go.js`). On a phone
+  with an ad-blocking DNS or filter that hop is the one request that gets dropped, which showed up
+  as "can't connect" on sponsored and top results only. The click still registers with Google; if
+  Google does not redirect (an expired link), `/go` falls back to sending the browser to the Google
+  link itself.
 - The fact-check pass roughly doubles the Claude usage per search. Set `OVERVIEW_VERIFY=false`
   to keep only the quick draft (which never searches the web itself).
 - Server-sent events need an unbuffered reverse proxy; the shipped nginx configs set

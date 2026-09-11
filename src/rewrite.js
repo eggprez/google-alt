@@ -329,6 +329,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
 
   const TRACKING = ['ved', 'ei', 'sa', 'sca_esv', 'sxsrf', 'biw', 'bih', 'dpr', 'source', 'sclient', 'uact', 'fbs', 'sqi', 'rlz', 'iflsig', 'gs_lp', 'gs_lcrp', 'gs_ssp', 'vsint', 'aep', 'ntc', 'cs'];
   const isGoogleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
+  const isAdHost = (h) => /(^|\.)googleadservices\.com$/i.test(h);
 
   document.querySelectorAll('a[href]').forEach((a) => {
     a.removeAttribute('ping');
@@ -337,10 +338,16 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     let u;
     try { u = new URL(a.getAttribute('href'), location.href); } catch { return; }
     if (u.protocol === 'javascript:') { a.removeAttribute('href'); return; }
-    if (isGoogleHost(u.hostname)) {
+    if (isGoogleHost(u.hostname) || isAdHost(u.hostname)) {
       if (u.pathname === '/url') {
         const target = u.searchParams.get('q') || u.searchParams.get('url');
         if (target && /^https?:/i.test(target)) { a.setAttribute('href', target); return; }
+      }
+      // Sponsored results (/aclk) and opaque result redirects (/goto) carry no destination we
+      // can unwrap here; the proxy follows Google's redirect for the browser (see src/go.js).
+      if (u.pathname === '/aclk' || u.pathname === '/goto' || u.pathname === '/pagead/aclk') {
+        a.setAttribute('href', proxyOrigin + '/go?u=' + encodeURIComponent(u.href));
+        return;
       }
       // Every tab, filter and results page stays on the proxy. Letting a tab link out to
       // google.com is what used to bring Google's own AI Overview back when you switched to

@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
+import { goHref } from './go.js';
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -121,7 +122,7 @@ export function renderAnswer(answerMd, sources, { streaming = false } = {}) {
     const s = byId.get(Number(n));
     if (streaming) return `<sup class="galt-cite"><span>${n}</span></sup>`;
     if (!s) return '';
-    return `<sup class="galt-cite"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}">${n}</a></sup>`;
+    return `<sup class="galt-cite"><a href="${esc(goHref(s.url))}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}">${n}</a></sup>`;
   }).join(''));
 
   return `<div class="galt-answer">${html}</div>`;
@@ -132,7 +133,7 @@ export function renderSourceList(sources) {
   const list = (sources || [])
     .filter((s) => s && s.url && /^https?:/i.test(s.url))
     .sort((a, b) => Number(a.id) - Number(b.id))
-    .map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer"><span class="galt-src-title">${esc(s.title || s.url)}</span><span class="galt-src-host">${esc(s.host || hostOf(s.url))}</span></a></li>`)
+    .map((s) => `<li><a href="${esc(goHref(s.url))}" target="_blank" rel="noopener noreferrer"><span class="galt-src-title">${esc(s.title || s.url)}</span><span class="galt-src-host">${esc(s.host || hostOf(s.url))}</span></a></li>`)
     .join('');
   return list ? `<div class="galt-sources"><div class="galt-sources-label">Sources</div><ol>${list}</ol></div>` : '';
 }

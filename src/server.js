@@ -10,6 +10,7 @@ import { overviewHandler, followupHandler } from './api.js';
 import { injectPage } from './inject.js';
 import { homePage, errorPage, opensearchXml } from './pages.js';
 import { parseGeoCookie, uuleFor } from './geo.js';
+import { isGoogleRedirect, resolveRedirect, userAgentFor } from './go.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -143,6 +144,27 @@ app.get('/search', async (req, res) => {
       showVnc: true,
     }));
   }
+});
+
+// A sponsored or redirect-wrapped result: follow Google's redirect here and send the browser to
+// the site, so a phone whose DNS or filter drops Google's click hosts still gets there (go.js).
+const hostOf = (s) => { try { return new URL(s).hostname; } catch { return '?'; } };
+app.get('/go', async (req, res) => {
+  const u = typeof req.query.u === 'string' ? req.query.u : '';
+  if (!isGoogleRedirect(u)) {
+    return res.status(400).type('html').send(errorPage({ title: 'Bad link', message: 'Not a Google redirect link.' }));
+  }
+  res.set('Cache-Control', 'private, no-store');
+  const t0 = Date.now();
+  let target = null;
+  try {
+    target = await resolveRedirect(u, { userAgent: userAgentFor(req.get('user-agent')) });
+  } catch (e) {
+    log('go: resolve failed', e.message);
+  }
+  log(`go ${hostOf(u)} -> ${target ? hostOf(target) : 'unresolved, sending to Google'} ${Date.now() - t0}ms`);
+  // Unresolved (expired link, challenge page): the Google link itself is the best we have.
+  res.redirect(302, target || u);
 });
 
 app.get('/api/overview', overviewHandler);
