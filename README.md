@@ -238,6 +238,10 @@ All settings are environment variables, documented in `.env.example`. The ones y
   as "can't connect" on sponsored and top results only. The click still registers with Google; if
   Google does not redirect (an expired link), `/go` falls back to sending the browser to the Google
   link itself.
+- Product tiles ("Popular products" and similar grids) are divs with no link: Google's script opens
+  a product panel on click, and the merchant URL is not in the page at all. `rewrite.js` marks them
+  (`data-galt-shop`) and the page script turns a tap into a Shopping-tab search for the exact
+  product title through the proxy (a web search when already on the Shopping tab).
 - The fact-check pass roughly doubles the Claude usage per search. Set `OVERVIEW_VERIFY=false`
   to keep only the quick draft (which never searches the web itself).
 - Server-sent events need an unbuffered reverse proxy; the shipped nginx configs set

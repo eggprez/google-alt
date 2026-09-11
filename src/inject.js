@@ -115,7 +115,7 @@ html.galt-dark .galt-noimg{background:rgba(255,255,255,.06)}
 html.galt-dark .galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1px 3px rgba(0,0,0,.5),0 4px 8px 3px rgba(0,0,0,.3)}
 html.galt-dark .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}
 /* Controls the page script drives: the precise-location chip and "People also ask" questions. */
-[data-galt-geo],[data-galt-paa]{cursor:pointer}
+[data-galt-geo],[data-galt-paa],[data-galt-shop]{cursor:pointer}
 [data-galt-geo="busy"]{opacity:.6;pointer-events:none}
 `;
 
@@ -218,6 +218,22 @@ export const PAGE_SCRIPT = `
     var q = e.target.closest('[data-galt-paa]'); if (!q) return;
     e.preventDefault();
     location.href = '/search?q=' + encodeURIComponent(q.getAttribute('data-galt-paa'));
+  });
+
+  // Product tiles without a link (see rewrite.js): search the Shopping tab for the product, or
+  // the web tab when this already is the Shopping tab.
+  function shopSearch(tile){
+    var onShopping = /[?&]udm=28(&|$)/.test(location.search);
+    location.href = '/search?q=' + encodeURIComponent(tile.getAttribute('data-galt-shop')) + (onShopping ? '' : '&udm=28');
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-galt-shop]'); if (!t) return;
+    e.preventDefault(); shopSearch(t);
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter') return;
+    var t = e.target.closest && e.target.closest('[data-galt-shop]'); if (!t) return;
+    e.preventDefault(); shopSearch(t);
   });
 })();
 `;

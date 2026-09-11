@@ -178,6 +178,46 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     if (b) b.setAttribute('data-galt-paa', p.getAttribute('data-q'));
   });
 
+  // Product tiles ("Popular products" and the like) are divs with no link at all: Google's script
+  // opens a product panel on click, fetched from a product id the tile carries. Without the
+  // script they were dead. The merchant URL is nowhere in the page, so a tap searches the
+  // Shopping tab for the exact product title instead (from the Shopping tab, the web tab), where
+  // the results are ordinary links. Tiles are found by the id element Google leaves in each one,
+  // with the class as a fallback.
+  const isPrice = (t) => /^\s*(?:[$€£]|USD)\s?\d/.test(t) || /^\s*\d[\d.,]*\s?(?:[$€£]|USD)/.test(t);
+  // Labels that name the control rather than the product ("Go to product viewer for this item.",
+  // "Product Image 1 of 1"), and the long accessibility description that runs "Title. Nearby,
+  // 5 mi. Current Price: ..." from which only the first sentence is the title.
+  const GENERIC_LABEL = /product viewer|product image|^image\b|^\s*(?:\d+%\s*off|sale|deal|new)\b/i;
+  const BADGE = /[.,]?\s*(?:\d+%\s*off|sale|deal)\.?\s*$/i;
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const tileTitle = (tile) => {
+    const cands = [];
+    for (const el of tile.querySelectorAll('[title], [aria-label], img[alt]')) {
+      cands.push(clean(el.getAttribute('title')), clean(el.getAttribute('aria-label')), clean(el.getAttribute('alt')).replace(/\.$/, ''));
+    }
+    for (const el of tile.querySelectorAll('div, span')) {
+      if (!el.children.length) cands.push(clean(el.textContent));
+    }
+    for (let t of cands) {
+      if (!t || t.length < 4 || GENERIC_LABEL.test(t) || isPrice(t)) continue;
+      if (t.length > 60 && t.includes('. ')) t = t.slice(0, t.indexOf('. '));
+      t = t.replace(BADGE, '').trim();
+      if (t.length >= 4 && t.length <= 150) return t;
+    }
+    return '';
+  };
+  document.querySelectorAll('[data-pid][data-cid], .UC8ZCe').forEach((el) => {
+    const tile = el.closest('[jsaction]') || el;
+    if (tile.hasAttribute('data-galt-shop') || tile.querySelector('a[href]') || tile.closest('a[href]')) return;
+    const title = tileTitle(tile);
+    if (!title) return;
+    tile.setAttribute('data-galt-shop', title);
+    tile.setAttribute('role', 'link');
+    tile.setAttribute('tabindex', '0');
+    tile.setAttribute('aria-label', title + ' - search Shopping');
+  });
+
   // Strip everything that only works on google.com's origin.
   document.querySelectorAll('script, iframe, noscript, link[rel~="preload"], link[rel~="prefetch"], link[rel~="dns-prefetch"], link[rel~="preconnect"], link[rel~="modulepreload"], meta[http-equiv], base')
     .forEach((e) => e.remove());
