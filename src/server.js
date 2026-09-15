@@ -62,7 +62,13 @@ app.use((req, res, next) => {
 
 // Params we forward to Google. Everything else (its tracking ids) is dropped. Every tab goes
 // through the proxy, so udm/tbm and the tab-specific filters travel with the query.
-const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filter', 'nfpr', 'spell', 'udm', 'tbm', 'oq', 'as_q', 'as_epq', 'as_oq', 'as_eq', 'as_sitesearch', 'as_filetype', 'ie', 'oe', 'imgsz', 'imgar', 'imgc', 'imgtype', 'chips', 'yv'];
+// The second row is Google's own page state, carried by the links it draws: si and stick pin a
+// knowledge panel (its Reviews / Photos / Menu tabs are searches with them), uds is a local
+// filter chip's state ("Open now" stays selected), ludocid and kgmid pin a business or entity,
+// lsack is the "More places" list. Without them those links are plain searches that lose the
+// panel they came from.
+const PASS = ['q', 'start', 'num', 'hl', 'gl', 'lr', 'cr', 'safe', 'tbs', 'filter', 'nfpr', 'spell', 'udm', 'tbm', 'oq', 'as_q', 'as_epq', 'as_oq', 'as_eq', 'as_sitesearch', 'as_filetype', 'ie', 'oe', 'imgsz', 'imgar', 'imgc', 'imgtype', 'chips', 'yv',
+  'si', 'stick', 'uds', 'ludocid', 'kgmid', 'lsack', 'prmd', 'oi', 'ct', 'noiga', 'aomd', 'story', 'fcs', 'fir', 'tbo', 'lqi', 'rflfq', 'rldimm', 'rlst', 'lci'];
 
 // Only the web tab can carry an AI Overview, so only it waits for Google's block to appear.
 function isWebTab(query) {

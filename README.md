@@ -195,6 +195,73 @@ All settings are environment variables, documented in `.env.example`. The ones y
   are left as they were. The chart itself was drawn as a 24px squiggle because its SVGs have no
   width attribute and were caught by the rule that clamps Google's unsized inline icons; the
   chart is exempt now.
+- **Local results and knowledge panels.** Audited on 2026-09-15 across a batch of business,
+  place, hotel, showtime and event searches on the mobile page. What Google's script drove and
+  what stands in for it now (all in `src/rewrite.js`, tapped through `data-galt-href` and friends
+  in the page script):
+  - *Call* is a link back to the results page with the number in `data-phone-number`; it is now
+    a `tel:` link. *Directions* is an Android `intent://` URL; the `https://google.com/maps/dir`
+    fallback inside it is used instead, which the Maps app still claims on Android and which
+    works on iOS and desktop too. A knowledge panel's Directions button has no URL at all, so it
+    routes to the address printed under it; the address itself (an `<a>` with the place's Maps
+    URL in `data-url`) becomes a link.
+  - A row in the local pack ("Places") is covered by a link to Google's place viewer
+    (`/url?url=/searchviewer/…`), a page only Google's scripts can draw. The row now opens the
+    business's own results page pinned to it with `ludocid=<id>`, which carries the panel with
+    hours, Call, Directions, reviews and photos. The row's text sits above the overlay link in
+    separate elements, so the row itself gets the destination too.
+  - **A business page lost its panel body.** The AI Overview on a business page sits in the same
+    container as the panel's Overview tab (address, hours, Call, Directions, description), and
+    the overview-removal code climbed up to that container and dropped all of it. It now stops
+    climbing when the parent reads much longer than the overview or holds a phone number.
+  - The map opens the Maps tab's URL for the query (a hotel map opens Google Travel via its
+    `data-url`). Video tiles carry the YouTube URL in `data-surl`; image tiles, a merchant's cover
+    photo and a panel's photo strip open the Images tab for the query. Event and activity tiles,
+    a movie's name and "More theaters and showtimes", a panel's "Tickets" / "Reviews" /
+    "Popular times" rows, and the hours line become searches for the thing (the content Google
+    fetched on tap is not in the page). A Local Services ad's "Call" opens the provider's profile
+    page, which the card already links to and which has the number.
+  - Filter chips over a local pack that open a sheet: "Vibe" (a list of links) becomes a dropdown
+    of them; "Price" and "Reservations" (forms Google's script submitted) are removed. The chip
+    links carry Google's `uds` state so the chosen filter shows as selected; `si`, `stick`,
+    `ludocid`, `kgmid` and `lsack` are passed through for the same reason (knowledge panel tabs
+    and "More places" are searches with them).
+  - "Read more" on a clamped description lifts the clamp. Sections that start open fold on tap;
+    an expander with no `aria-controls` ("6 key moments in this video") toggles the hidden list
+    next to it. Share uses the phone's share sheet (or copies the link). The "About this result"
+    dots, Follow, Save, the panel's overflow menu and "Order" buttons that never had a link are
+    removed; the main menu is hidden but keeps its space.
+  - Left as they were: showtime buttons (Google's ticket dialog), the showtimes filter chips,
+    hotel guest/date pickers, "My Ad Center", the merchant AI "Ask" box.
+  A second sweep the same day covered answer widgets, entity panels and the other tabs:
+  - *Images tab* (and the "Images" strip on the web tab): each result names its source page in
+    `data-lpage`, so a tile opens that page, as Google's viewer's "Visit" would. *Shopping tab*
+    tiles search the web tab for the product (their only links are Google's help pages, which
+    used to make them look linked). A product page's merchant offers carry `data-target-url`
+    and open the store; its image carousel opens the Images tab.
+  - *Calculator*: the keypad and the keyboard work locally (`inject.js` parses what the keys
+    write: `7×8+(3−1)÷4`, `sin(30)`, `5!`, `2^10`, `50%`, Ans, Inv, Deg/Rad). The 123/Fx flip
+    and the history panel are Google's and stay as they are. *Currency*: the rate is in the page
+    (`data-exchange-rate`), so amounts recompute as you type; picking another currency is a new
+    search. *Unit converter*: any change is a new search Google answers ("5 mile to meter").
+  - *Translate*: the language pickers open Google's own language lists (243 entries, scrolling)
+    and a pick, Enter in the text box, and the swap arrow are new "translate … to …" searches.
+    The speaker buttons use the browser's speech synthesis, copy copies, the dictionary rows
+    search the word. The microphone, camera and fullscreen buttons need Google's app and go.
+  - *Sports scores*: a match row searches "Packers vs Vikings" pinned with the match's `kgmid`;
+    "More games" searches the schedule. *Weather*: a day in the strip searches that day's
+    forecast; Google's "Add to home screen" promo and the Froggy game go.
+  - *Entity panels* (a show, a film, a person, an album): the cards' chips ("Where to watch",
+    "Cast", "Songs") either fold their list out or search for the topic, and the summary tile
+    beside a chip follows it; a trailer tile searches the Videos tab for the clip; the
+    "Overview" blurb unclamps.
+  - *Videos*: a video's "key moment" rows open it at that offset (`&t=`), the untimed ones open
+    it from the start. A card's photo slideshow (recipes) steps with its arrows.
+  The audit harness lives in `.scratch/audit-*.mjs`: `audit-capture.mjs` fetches live pages
+  through the real rewrite, `audit-scan.mjs` lists every visible control Google made interactive
+  that has no link and no handler, `audit-click.mjs` taps the fixed ones and reports where they
+  went; `audit-rerewrite.mjs` re-applies the current rewrite to a captured page offline (useful
+  when Google is serving the profile a captcha). Re-run it after Google changes its markup.
 - **Precise location.** Google places you by the container's IP until told otherwise. The
   "Use precise location" chip in the location bar under the tabs, and the "Update location" button
   in the page footer, ask your phone for its position

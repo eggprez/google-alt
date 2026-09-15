@@ -27,6 +27,32 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     return { blocked: 'unexpected', title: document.title };
   }
 
+  // Shared by the handlers below. q0 is the query this page is for.
+  const q0 = here.searchParams.get('q') || '';
+  const text1 = (el) => (el && (el.innerText || el.textContent) || '').replace(/\s+/g, ' ').trim();
+  const searchHref = (q, extra) => proxyOrigin + '/search?q=' + encodeURIComponent(q) + (extra || '');
+  // A destination for a control that had none: the page script sends a tap there (inject.js).
+  const setHref = (el, href) => {
+    if (el.hasAttribute('data-galt-href')) return;
+    el.setAttribute('data-galt-href', href);
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+  };
+  const hasLink = (el) => !!(el.querySelector('a[href]') || el.closest('a[href]'));
+  // The line set in the largest type inside a tile is its title (a movie's name over its genre
+  // line, an event's name over its date).
+  const titleOf = (tile) => {
+    let best = '';
+    let size = 0;
+    for (const el of tile.querySelectorAll('span, div')) {
+      if (el.children.length && !Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue;
+      const t = text1(el);
+      if (t.length < 3 || t.length > 120) continue;
+      const fs = parseFloat(getComputedStyle(el).fontSize) || 0;
+      if (fs > size) { size = fs; best = t; }
+    }
+    return best;
+  };
+
   // Page landmarks the overview block must never swallow. Google renders the overview in a
   // full-width band (#rcnt > div) that also holds the top ads slot (#tads), so we climb from an
   // overview-specific anchor until the next step up would include one of these.
@@ -35,10 +61,19 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const isTop = (el) => !el || el === document.body || el === document.documentElement || LANDMARK_IDS.includes(el.id);
   const holdsLandmark = (el) => landmarks.some((l) => l !== el && el.contains(l));
 
+  // A parent that reads much longer than the overview, or holds a business's phone number,
+  // has something else in it. A business page puts the overview in the same container as the
+  // panel's Overview tab (address, hours, Call, Directions), and climbing into that container
+  // took the whole panel body with the overview. The overview's own wrappers only add its
+  // heading, footer and disclaimer.
+  const textLen = (el) => text1(el).length;
+  const holdsBusiness = (el) => !!el.querySelector('[data-phone-number], a[href^="tel:"], [data-attrid="title"]');
   function climb(start) {
     let el = start;
     while (el.parentElement && !isTop(el.parentElement) && !holdsLandmark(el.parentElement)) {
-      el = el.parentElement;
+      const p = el.parentElement;
+      if (textLen(p) > textLen(el) + 160 || (holdsBusiness(p) && !holdsBusiness(el))) break;
+      el = p;
     }
     if (isTop(el) || holdsLandmark(el)) return null;
     return el;
@@ -220,16 +255,46 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const markToggle = (btn, panel) => {
     if (!panel || panel.id === 'hdtbMenus' || btn.hasAttribute('data-galt-paa')) return;
     if (btn.matches('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls')) return;
-    if (panel.querySelector('[role="progressbar"]') || !(panel.textContent || '').trim()) return;
-    // Only panels hidden outright. The desktop financials chips park their table as an invisible
-    // popover (position:absolute, sized by Google's script to overlay the neighbours); shown in
-    // the flow of its 204px card it does not fit, so those stay as they were.
-    if (getComputedStyle(panel).display !== 'none') return;
+    if (panel.querySelector('[role="progressbar"]') || !(panel.textContent || '').trim()) {
+      // A knowledge panel row whose content Google fetches on tap ("Tickets", "Popular times",
+      // "Reviews" under a landmark): nothing to unfold, so tap searches for it, like a PAA.
+      const t = text1(btn.querySelector('[jsname="r4nke"]'));
+      if (t && t.length <= 40 && q0 && !hasLink(btn)) btn.setAttribute('data-galt-paa', q0 + ' ' + t.toLowerCase());
+      return;
+    }
+    if (getComputedStyle(panel).display !== 'none') {
+      // A section that starts open ("About", "Images", "Nearby places") folds on tap, as it
+      // does on google.com. Anything else visible is left alone: the desktop financials chips
+      // park their table as an invisible popover (position:absolute, sized by Google's script
+      // to overlay the neighbours) that does not fit in the flow of its 204px card.
+      if (btn.getAttribute('aria-expanded') !== 'true') return;
+      if (!panel.id) panel.id = 'galt-panel-' + (++panelSeq);
+      btn.setAttribute('data-galt-toggle', panel.id);
+      btn.setAttribute('data-galt-init', 'open');
+      return;
+    }
     if (!panel.id) panel.id = 'galt-panel-' + (++panelSeq);
     btn.setAttribute('data-galt-toggle', panel.id);
     btn.setAttribute('aria-expanded', 'false');
   };
   document.querySelectorAll('[role="button"][aria-controls]').forEach((b) => markToggle(b, document.getElementById(b.getAttribute('aria-controls'))));
+  // An expander that names no panel ("6 key moments in this video", a place's hours): the
+  // hidden content is the next thing in its container.
+  document.querySelectorAll('[role="button"][aria-expanded="false"]:not([aria-controls])').forEach((b) => {
+    if (b.hasAttribute('data-galt-toggle') || b.hasAttribute('data-galt-paa') || b.closest('.galt')) return;
+    const holder = b.parentElement;
+    if (!holder) return;
+    // The hidden element is the sibling itself, or the sibling's only child (the key moments
+    // list sits in a zero-height wrapper).
+    const hiddenOf = (c) => (getComputedStyle(c).display === 'none' ? c : (c.children.length === 1 && getComputedStyle(c.firstElementChild).display === 'none' ? c.firstElementChild : null));
+    let hidden = null;
+    for (const c of holder.children) {
+      if (c === b || c.contains(b)) continue;
+      const h = hiddenOf(c);
+      if (h && (h.textContent || '').trim().length > 20) { hidden = h; break; }
+    }
+    if (hidden) markToggle(b, hidden);
+  });
   document.querySelectorAll('[jscontroller="qWD4e"][role="button"]').forEach((b) => markToggle(b, b.parentElement && b.parentElement.querySelector(':scope > .ZfqtA')));
 
   // Product tiles ("Popular products" and the like) are divs with no link at all: Google's script
@@ -242,7 +307,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   // Labels that name the control rather than the product ("Go to product viewer for this item.",
   // "Product Image 1 of 1"), and the long accessibility description that runs "Title. Nearby,
   // 5 mi. Current Price: ..." from which only the first sentence is the title.
-  const GENERIC_LABEL = /product viewer|product image|^image\b|^\s*(?:\d+%\s*off|sale|deal|new)\b/i;
+  const GENERIC_LABEL = /product viewer|product image|^image\b|interactive|autorotating|showing the item|^\s*(?:\d+%\s*off|sale|deal|new)\b/i;
   const BADGE = /[.,]?\s*(?:\d+%\s*off|sale|deal)\.?\s*$/i;
   const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const tileTitle = (tile) => {
@@ -254,8 +319,13 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
       if (!el.children.length) cands.push(clean(el.textContent));
     }
     for (let t of cands) {
-      if (!t || t.length < 4 || GENERIC_LABEL.test(t) || isPrice(t)) continue;
-      if (t.length > 60 && t.includes('. ')) t = t.slice(0, t.indexOf('. '));
+      if (!t || t.length < 4 || isPrice(t)) continue;
+      // A long accessibility label is sentences ("An interactive ... angles.Sony WH-1000XM6
+      // Headphones. 180. Also nearby. Current Price: ..."): the first that is not boilerplate.
+      if (t.length > 60 && /\.\s*(?=[A-Z0-9$])/.test(t)) {
+        t = t.split(/\.\s*(?=[A-Z0-9$])/).map((x) => x.trim()).find((x) => x.length >= 4 && !GENERIC_LABEL.test(x) && !isPrice(x)) || '';
+      }
+      if (!t || GENERIC_LABEL.test(t)) continue;
       t = t.replace(BADGE, '').trim();
       if (t.length >= 4 && t.length <= 150) return t;
     }
@@ -263,7 +333,8 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   };
   document.querySelectorAll('[data-pid][data-cid], .UC8ZCe').forEach((el) => {
     const tile = el.closest('[jsaction]') || el;
-    if (tile.hasAttribute('data-galt-shop') || tile.querySelector('a[href]') || tile.closest('a[href]')) return;
+    // (The "About this result" / "Report" help links every Shopping-tab tile carries do not count.)
+    if (tile.hasAttribute('data-galt-shop') || tile.querySelector('a[href]:not([href*="support.google.com"]):not([href*="policies.google.com"])') || tile.closest('a[href]')) return;
     const title = tileTitle(tile);
     if (!title) return;
     tile.setAttribute('data-galt-shop', title);
@@ -273,7 +344,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   });
 
   // Strip everything that only works on google.com's origin.
-  document.querySelectorAll('script, iframe, noscript, link[rel~="preload"], link[rel~="prefetch"], link[rel~="dns-prefetch"], link[rel~="preconnect"], link[rel~="modulepreload"], meta[http-equiv], base')
+  document.querySelectorAll('script, iframe, noscript, link[rel~="preload"], link[rel~="prefetch"], link[rel~="dns-prefetch"], link[rel~="preconnect"], link[rel~="modulepreload"], link[rel~="expect"], meta[http-equiv], base')
     .forEach((e) => e.remove());
 
   // Lazy images. Most thumbnails on a results page — social posts, video stills, site logos,
@@ -401,7 +472,7 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     img.replaceWith(span.firstElementChild);
     if (a) { a.setAttribute('href', proxyOrigin + '/'); a.classList.add('galt-logo-link'); }
   });
-  document.title = document.title.replace(/\s*-\s*Google Search\s*$/i, ' - Boogle');
+  document.title = document.title.replace(/\s*-\s*Google (?:Search|Shopping)\s*$/i, ' - Boogle');
 
   // Google picks light or dark on the server, from the account setting — it ignores the viewer's
   // prefers-color-scheme (verified: a SERP fetched with dark emulated still came back light, and
@@ -425,6 +496,312 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const isGoogleHost = (h) => /(^|\.)google\.[a-z.]+$/i.test(h);
   const isAdHost = (h) => /(^|\.)googleadservices\.com$/i.test(h);
 
+  // ---- Controls Google's scripts drove, given something to do without them. ----
+  // Phone numbers. "Call" is a link back to the results page carrying the number in an
+  // attribute; Google's script dialled it. Dial it with the link instead.
+  document.querySelectorAll('[data-phone-number]').forEach((el) => {
+    const n = (el.getAttribute('data-phone-number') || '').replace(/[^\d+]/g, '');
+    if (!n) return;
+    if (el.tagName === 'A') el.setAttribute('href', 'tel:' + n);
+    else if (!hasLink(el)) setHref(el, 'tel:' + n);
+  });
+  // Directions are Android intent: links (they open the Maps app). Firefox on iOS and any
+  // desktop browser cannot follow one; the plain Maps URL inside opens the app on Android too.
+  const intentToHttps = (h) => {
+    const m = /S\.browser_fallback_url=([^;]+)/.exec(h);
+    let target = '';
+    try { target = m ? decodeURIComponent(m[1]) : 'https://' + h.slice('intent://'.length).split('#Intent')[0]; } catch { /* malformed */ }
+    return /^https?:/.test(target) ? target : '';
+  };
+  document.querySelectorAll('a[href^="intent:"]').forEach((a) => {
+    const target = intentToHttps(a.getAttribute('href'));
+    if (target) a.setAttribute('href', target);
+  });
+  // A place in the local pack. Its row is covered by a link to Google's place viewer, a page
+  // only Google's scripts can draw. The business's own results page, pinned to it by Google's
+  // id (ludocid), carries the same panel: hours, Call, Directions, reviews, photos.
+  // The desktop rows (and a panel's "Nearby places") carry no ludocid, but their id holds the
+  // entity's kgmid ("pv-/g/11ywms_jpy"), which pins the panel the same way.
+  document.querySelectorAll('[data-ludocid], [id^="pv-/"]').forEach((tile) => {
+    if (tile.closest('[data-galt-href]')) return;
+    const cid = tile.getAttribute('data-ludocid') || '';
+    const mid = tile.id.startsWith('pv-/') ? tile.id.slice(3) : '';
+    if (!/^\d+$/.test(cid) && !/^\/[gm]\/[\w-]+$/.test(mid)) return;
+    const name = (text1(tile.querySelector('[role="heading"]')) || titleOf(tile)).replace(/^[A-Z]\.?\s+/, '');
+    if (!name) return;
+    const href = searchHref(name, /^\d+$/.test(cid) ? '&ludocid=' + cid : '&kgmid=' + encodeURIComponent(mid));
+    // The overlay link only catches taps on the row's empty space (the text sits above it in
+    // its own elements), so the row itself gets the destination too.
+    tile.querySelectorAll('a[data-open-viewer], a[href*="/searchviewer"]').forEach((a) => a.setAttribute('href', href));
+    if (!tile.closest('a[href]')) setHref(tile, href);
+    // "Menu" on a Places-tab row opened a panel Google fetched; search for the menu instead.
+    tile.querySelectorAll('[role="button"]').forEach((b) => {
+      if (/^menu$/i.test(text1(b)) && !hasLink(b)) setHref(b, searchHref(name + ' menu'));
+    });
+  });
+  // The map. Google's script opened the Maps view of the query; the Maps tab links there.
+  const mapsTab = document.querySelector('a[href*="maps.google.com/maps"]');
+  document.querySelectorAll('[jscontroller="pGR4wc"], [jscontroller="vHlTde"], [jscontroller="H2R8Vd"], [role="region"][aria-label="Map"]').forEach((m) => {
+    // (The map's own "Terms" link stays a link: a tap on it wins over the map's destination.)
+    if (m.closest('[data-galt-href], a[href]')) return;
+    const du = m.getAttribute('data-url') || '';
+    let href = '';
+    if (du.startsWith('/')) href = 'https://' + location.hostname + du;
+    else if (mapsTab) href = mapsTab.getAttribute('href');
+    else if (q0) href = 'https://www.google.com/maps/search/' + encodeURIComponent(q0);
+    if (href) setHref(m, href);
+  });
+  // Tiles whose destination is in a data-url (the "Ask anything in AI Mode" suggestions, the
+  // hotel map): a Google path, proxied when it is a search.
+  // A knowledge panel's address is an <a> with no href and the place's Maps URL as an intent.
+  document.querySelectorAll('[data-url]').forEach((el) => {
+    if (el.closest('[data-galt-href]') || hasLink(el)) return;
+    if (!/^(button|link)$/.test(el.getAttribute('role') || '') && !el.hasAttribute('jsaction')) return;
+    let raw = el.getAttribute('data-url') || '';
+    if (/^intent:\/\//i.test(raw)) raw = intentToHttps(raw);
+    if (!raw || !/^(\/|https?:)/.test(raw)) return;
+    let u;
+    try { u = new URL(raw, location.href); } catch { return; }
+    let href = u.href;
+    if (isGoogleHost(u.hostname) && u.pathname === '/search') {
+      if (u.searchParams.get('udm') === '50') u.searchParams.delete('udm');
+      TRACKING.forEach((k) => u.searchParams.delete(k));
+      href = proxyOrigin + '/search?' + u.searchParams.toString();
+    }
+    if (el.tagName === 'A') el.setAttribute('href', href); else setHref(el, href);
+  });
+  // The panel's "Directions" button has no destination in the page at all; Maps can route to
+  // the address printed under it.
+  const kpAddress = text1(document.querySelector('[jscontroller="x0z7kc"] a[data-url], [data-attrid*="address" i]'));
+  if (kpAddress) {
+    document.querySelectorAll('[jscontroller="pU86Hd"][role="link"]').forEach((b) => {
+      if (hasLink(b) || !/^directions$/i.test(text1(b))) return;
+      setHref(b, 'https://www.google.com/maps/dir//' + encodeURIComponent(kpAddress));
+    });
+  }
+  // Video tiles carry the video's URL; Google's script played it inline.
+  // A video result in the Videos section wraps its title link and key moments too: there,
+  // just the thumbnail gets the destination.
+  document.querySelectorAll('[data-surl], [data-curl]').forEach((el) => {
+    if (el.closest('[data-galt-href], a[href]')) return;
+    const u = el.getAttribute('data-surl') || el.getAttribute('data-curl') || '';
+    if (!/^https?:/.test(u)) return;
+    if (!el.querySelector('a[href]')) { setHref(el, u); return; }
+    el.querySelectorAll('[role="button"]').forEach((b) => {
+      if (hasLink(b) || b.closest('[data-galt-href]')) return;
+      if (b.hasAttribute('data-galt-toggle') || b.hasAttribute('data-galt-paa') || b.hasAttribute('data-galt-clamp')) return;
+      // A "key moment" row names its offset ("From 1 minute, 17 seconds."): play from there.
+      const m = /From (?:(\d+) minutes?)?,?\s*(?:(\d+) seconds?)?/.exec(b.getAttribute('aria-label') || '');
+      if (m && (m[1] || m[2])) { setHref(b, u + (u.includes('?') ? '&' : '?') + 't=' + ((+m[1] || 0) * 60 + (+m[2] || 0))); return; }
+      // The thumbnail and the untimed "key moment" rows play the video; the expander beside
+      // them ("6 key moments") was excluded above.
+      setHref(b, u);
+    });
+  });
+  // An image result (the Images tab, the "Images" strip on the web tab) names its source page
+  // in data-lpage; Google's viewer would have offered "Visit". Go straight there.
+  document.querySelectorAll('[data-lpage^="http"]').forEach((card) => {
+    const tile = card.querySelector('[jscontroller="aw2uhd"], [role="button"]') || card;
+    if (tile.closest('[data-galt-href], a[href]') || tile.querySelector('a[href]')) return;
+    setHref(tile, card.getAttribute('data-lpage'));
+  });
+  // Image tiles (the "Images" strip, a merchant's cover photo, a knowledge panel's thumbnail)
+  // opened Google's image viewer, which is a script. The Images tab for the query is the
+  // nearest thing in the page.
+  if (q0) {
+    document.querySelectorAll('[jscontroller="aw2uhd"][role="button"], [data-attrid="ShoppingMerchantSingleCoverImage"], [data-attrid="VisualDigestImageResult"][role="button"], [data-attrid="VisualDigestImageResult"] [role="button"], [jscontroller="n5EtZd"][role="button"], [jscontroller="n5EtZd"] [role="button"]').forEach((el) => {
+      if (el.closest('[data-galt-href]') || hasLink(el)) return;
+      setHref(el, searchHref(q0, '&udm=2'));
+    });
+  }
+  // Showtimes. A movie's name opened its panel; tapping it, or "More theaters and showtimes"
+  // under it, searches for the movie's showtimes. The showtime buttons themselves led into
+  // Google's ticket dialog, which needs its script; they are left as they are.
+  document.querySelectorAll('[jscontroller="mNvPwf"] [role="heading"][data-mid]').forEach((h) => {
+    if (hasLink(h)) return;
+    const t = titleOf(h);
+    if (!t) return;
+    h.setAttribute('data-galt-title', t);
+    setHref(h, searchHref(t + ' showtimes'));
+  });
+  document.querySelectorAll('[jscontroller="mNvPwf"] [role="button"]').forEach((b) => {
+    if (b.closest('[data-galt-href]') || hasLink(b) || !/showtimes/i.test(text1(b))) return;
+    let card = b.parentElement;
+    let h = null;
+    while (card && card !== document.body && !(h = card.querySelector('[data-galt-title]'))) card = card.parentElement;
+    if (h) setHref(b, searchHref(h.getAttribute('data-galt-title') + ' showtimes'));
+  });
+  // A widget's tab strip (Theaters | Movies): the other tab is another search.
+  document.querySelectorAll('[role="tablist"] [role="tab"]').forEach((t) => {
+    if (hasLink(t) || t.getAttribute('aria-selected') === 'true' || t.closest('[data-galt-href]')) return;
+    const label = text1(t);
+    if (label && label.length <= 30 && q0) setHref(t, searchHref(q0 + ' ' + label.toLowerCase()));
+  });
+  // Event, activity and place tiles ("things to do this weekend") opened a viewer Google
+  // fetches; search for the thing.
+  document.querySelectorAll('[data-ssid$="_viewer_entrypoint"][role="button"], [data-ssid="lcl_place_tile_button"]').forEach((t) => {
+    if (t.closest('[data-galt-href]') || hasLink(t)) return;
+    const title = titleOf(t);
+    if (title) setHref(t, searchHref(title));
+  });
+  // A place's "Museums" / "Events" / "Restaurants" rows (a city's panel) opened a list Google
+  // fetches; search for that kind of thing there.
+  document.querySelectorAll('[data-attrid="LocalNavDynamicInfolistItem"] [role="button"], [data-attrid="LocalNavDynamicInfolistItem"][role="button"]').forEach((b) => {
+    if (b.closest('[data-galt-href]') || hasLink(b)) return;
+    const t = titleOf(b);
+    if (t && q0) setHref(b, searchHref(q0 + ' ' + t.toLowerCase()));
+  });
+  // An entity panel's cards (a show's "Where to watch", "Cast", "Ratings", "Release date"): a
+  // chip naming the topic over a tile Google's script opened into a sheet. Both search for the
+  // entity and the topic; links inside a tile (the streaming services, IMDb) stay links.
+  let chipSeq = 0;
+  // (Some chips are plain labels without role=button, e.g. "Ratings" on a film; same deal.)
+  document.querySelectorAll('[jscontroller="qWD4e"]').forEach((chip) => {
+    if (chip.closest('[data-galt-href], [data-galt-proxy]') || chip.querySelector('[jscontroller="lT1z8b"]')) return;
+    if (chip.hasAttribute('data-galt-toggle')) {
+      // The chip folds a list out ("Songs" over "Cruel Summer, Shake It Off, ..."); the summary
+      // tile beside it does the same.
+      if (!chip.id) chip.id = 'galt-chip-' + (++chipSeq);
+      const card = chip.parentElement || chip;
+      card.querySelectorAll('[jscontroller="lT1z8b"]').forEach((c) => {
+        if (!c.closest('a[href], [data-galt-proxy], [data-galt-href]')) c.setAttribute('data-galt-proxy', chip.id);
+      });
+      return;
+    }
+    if (hasLink(chip) || chip.closest('[data-galt-href]')) return;
+    const label = text1(chip);
+    if (!label || label.length > 30 || !q0) return;
+    const href = searchHref(q0 + ' ' + label.toLowerCase());
+    setHref(chip, href);
+    const card = chip.parentElement && chip.parentElement.querySelector('[jscontroller="lT1z8b"]') ? chip.parentElement : chip.closest('[data-attrid]');
+    if (card) card.querySelectorAll('[jscontroller="lT1z8b"]').forEach((t) => { if (!t.closest('[data-galt-href], a[href]')) setHref(t, href); });
+  });
+  // The trailer tile names its clip in data-attrid; the Videos tab has it.
+  document.querySelectorAll('[data-attrid*="/media_item/trailer/"]').forEach((t) => {
+    if (t.closest('[data-galt-href]') || hasLink(t)) return;
+    const title = t.getAttribute('data-attrid').split('/trailer/')[1];
+    if (title) setHref(t, searchHref(title, '&udm=7'));
+  });
+  // A merchant offer (the offers grid under a product) carries its store URL.
+  document.querySelectorAll('[data-target-url^="http"]').forEach((el) => {
+    if (el.closest('[data-galt-href], a[href]') || el.querySelector('a[href]')) return;
+    setHref(el, el.getAttribute('data-target-url'));
+  });
+  // A match row in a scores list opened the game's panel; search for the game, pinned to it.
+  document.querySelectorAll('[jscontroller="ThULI"][role="link"]').forEach((row) => {
+    if (row.closest('[data-galt-href]')) return;
+    let teams = Array.from(row.querySelectorAll('td[class*="tt-w"]')).map((td) => (td.innerText || '').split('\n')[0].trim()).filter(Boolean);
+    if (teams.length !== 2) {
+      // Each team's name is printed twice in a row (crest label and name).
+      const lines = (row.innerText || '').split('\n').map((x) => x.trim());
+      teams = lines.filter((x, i) => x && x === lines[i + 1] && !/^\d+$/.test(x));
+    }
+    if (teams.length !== 2) return;
+    const midEl = row.querySelector('[data-mid]');
+    const mid = midEl ? midEl.getAttribute('data-mid') : '';
+    setHref(row, searchHref(teams[0] + ' vs ' + teams[1], /^\/[gm]\//.test(mid) ? '&kgmid=' + encodeURIComponent(mid) : ''));
+  });
+  document.querySelectorAll('[jscontroller="sspKBe"][role="button"], [jscontroller="sspKBe"] [role="button"]').forEach((b) => {
+    if (q0 && /more games/i.test(text1(b)) && !hasLink(b)) setHref(b, searchHref(q0.replace(/\bscores?\b/i, '').trim() + ' schedule'));
+  });
+  // The weather widget's day strip switched the hourly view; each day is its own forecast.
+  const DAYS = { sun: 'sunday', mon: 'monday', tue: 'tuesday', wed: 'wednesday', thu: 'thursday', fri: 'friday', sat: 'saturday' };
+  document.querySelectorAll('[jscontroller="hGVs6"][role="button"]').forEach((d) => {
+    const m = /^(sun|mon|tue|wed|thu|fri|sat)/i.exec((d.getAttribute('aria-label') || text1(d)).trim());
+    if (!m || !q0 || hasLink(d)) return;
+    setHref(d, searchHref((/weather|forecast/i.test(q0) ? q0 : 'weather ' + q0) + ' ' + DAYS[m[1].toLowerCase()]));
+  });
+  // Translate. The language pickers become dropdowns of Google's own language lists (the list
+  // sits hidden beside a "Search languages" box, one per side); the page script turns a pick,
+  // Enter in the text box, and the swap arrow into a new "translate ... to ..." search. The
+  // microphone, camera and fullscreen buttons need Google's app.
+  document.querySelectorAll('#tw-sl, #tw-tl').forEach((btn) => {
+    const side = btn.id === 'tw-sl' ? 'sl' : 'tl';
+    const box = document.getElementById(side + '_list-search-box');
+    const wrap = box && box.closest('.language-list');
+    const list = wrap && Array.from(wrap.querySelectorAll('.language_list_languages')).sort((a, b) => b.children.length - a.children.length)[0];
+    if (!list || !list.children.length) return;
+    if (!list.id) list.id = 'galt-langs-' + side;
+    list.querySelectorAll('[role="button"]').forEach((it) => it.setAttribute('data-galt-lang', side));
+    btn.setAttribute('data-galt-menu', list.id);
+    btn.setAttribute('aria-haspopup', 'menu');
+  });
+  document.querySelectorAll('#tw-mic, #tw-cst, [id^="tw-fs"], [jscontroller="JlIvbd"], [aria-label^="Translate with your camera"], [aria-label="Translate by voice"]').forEach((e) => e.remove());
+  {
+    const tgt = text1(document.getElementById('tw-target-text'));
+    if (tgt) document.querySelectorAll('#tw-tmenu [jsaction="dWdiIc"]').forEach((b) => setHref(b, searchHref(tgt)));
+    const srcLang = text1(document.getElementById('tw-sl')).replace(/\s*-\s*detected$/i, '');
+    document.querySelectorAll('[data-attrid="tw-bilingualDictionary"][role="button"], [data-attrid="tw-bilingualDictionary"] [role="button"]').forEach((row) => {
+      const word = text1(row.querySelector('div, span'));
+      if (word && srcLang && !hasLink(row)) setHref(row, searchHref('translate ' + word + ' to ' + srcLang));
+    });
+  }
+  // The weather line in a place's panel opened the forecast.
+  document.querySelectorAll('[data-attrid="WeatherAndClimateVise"], [data-attrid="WeatherAndClimateVise"] [jsaction]').forEach((w) => {
+    if (q0 && !w.closest('[data-galt-href]') && !hasLink(w)) setHref(w, searchHref(q0 + ' weather'));
+  });
+  // A product's image carousel opened Google's image viewer; the Images tab has the pictures.
+  document.querySelectorAll('[data-attrid="kc:/shopping/gpc:image-set"] [role="listitem"], [data-attrid="kc:/shopping/gpc:image-set"] [role="button"]').forEach((t) => {
+    if (q0 && !t.closest('[data-galt-href], a[href]') && !t.querySelector('a[href]') && t.querySelector('img')) setHref(t, searchHref(q0, '&udm=2'));
+  });
+  // The photo strip and "View all photos" in a place's panel opened Google's photo viewer.
+  document.querySelectorAll('[role="button"][aria-label="View all photos"], g-scrolling-carousel button[data-phdesc]').forEach((b) => {
+    if (q0 && !hasLink(b)) setHref(b, searchHref(q0, '&udm=2'));
+  });
+  // The panel's hours line opened the week's hours, which are not in the page.
+  document.querySelectorAll('[jscontroller="EQHD1"] [role="button"]').forEach((b) => {
+    if (q0 && !hasLink(b) && !b.hasAttribute('data-galt-toggle')) b.setAttribute('data-galt-paa', q0 + ' hours');
+  });
+  // Local Services ads: the "Call" button's number is not in the page; the provider's profile
+  // page (which the card already links to) has it.
+  document.querySelectorAll('[jscontroller="VChu3e"][role="button"]').forEach((b) => {
+    let card = b.parentElement;
+    let a = null;
+    for (let i = 0; card && i < 8 && !(a = card.querySelector('a[href*="/localservices/profile"]')); i++) card = card.parentElement;
+    if (a) setHref(b, a.getAttribute('href'));
+  });
+  // Filter chips that open a sheet ("Vibe", "Price", "Reservations" over a local pack). One
+  // whose sheet is a list of links becomes a dropdown of them (the page script's menus); one
+  // whose sheet is a form Google's script would have submitted goes.
+  let menuSeq = 0;
+  document.querySelectorAll('[jscontroller="scFHte"]').forEach((chip) => {
+    const trigger = chip.querySelector(':scope > [role="button"]');
+    const list = chip.querySelector('[role="dialog"] [role="list"]');
+    if (!trigger) return;
+    if (!list || !list.querySelector('a[href]')) { chip.remove(); return; }
+    list.querySelectorAll('a:not([href])').forEach((a) => (a.closest('[role="listitem"]') || a).remove());
+    if (!list.id) list.id = 'galt-menu-' + (++menuSeq);
+    trigger.setAttribute('data-galt-menu', list.id);
+    trigger.setAttribute('aria-haspopup', 'menu');
+  });
+  // Share buttons: the phone's own share sheet, or the link copied.
+  document.querySelectorAll('[role="button"][aria-label="Share"], [role="button"][aria-label^="Share "]').forEach((b) => {
+    if (b.closest('.galt') || hasLink(b)) return;
+    b.setAttribute('data-galt-share', (b.getAttribute('aria-label') || '').replace(/^Share\s*/i, ''));
+  });
+  // "Read more" on a clamped description (a merchant's blurb, a product overview): unclamp it.
+  document.querySelectorAll('[role="button"][aria-expanded="false"], [data-expandable="1"][data-collapsed="1"]').forEach((b) => {
+    if (b.hasAttribute('data-galt-paa') || b.hasAttribute('data-galt-toggle') || b.hasAttribute('aria-controls') || b.closest('a[href]')) return;
+    if (!b.querySelector('[style*="line-clamp"]')) return;
+    b.setAttribute('data-galt-clamp', '1');
+  });
+  // Controls that only work signed in to google.com or inside its scripts, with nothing to
+  // stand in: the "About this result" dots on every result, Follow, the knowledge panel's
+  // overflow menu, "Order" buttons that never had a link. The main menu keeps its space so
+  // the header does not reflow.
+  document.querySelectorAll('[jscontroller="i8S0p"], [jscontroller="edDbvc"], [jscontroller="W5nr0b"], [jscontroller="DPreE"] [jsname="oYxtQd"], a[jscontroller="pcweGb"]:not([href]), [jscontroller="rRNiyd"], [jscontroller="QhmaJc"], [aria-label="Froggy\'s World game"]').forEach((e) => e.remove());
+  // "Add to home screen" (Google's own shortcut promo) and its "Try it".
+  document.querySelectorAll('[jscontroller="Jlf2lc"]').forEach((b) => {
+    let card = null;
+    for (let e = b.parentElement, i = 0; e && e !== document.body && i < 8; e = e.parentElement, i++) {
+      const t = (e.textContent || '').trim();
+      if (t.length > 300) break;
+      if (/add to home screen/i.test(t)) card = e;
+    }
+    if (card) card.remove();
+  });
+  document.querySelectorAll('[jsname="hyP9Qc"][aria-label="Main menu"]').forEach((e) => { e.style.visibility = 'hidden'; e.setAttribute('aria-hidden', 'true'); });
+
   document.querySelectorAll('a[href]').forEach((a) => {
     a.removeAttribute('ping');
     a.removeAttribute('onmousedown');
@@ -436,6 +813,8 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
       if (u.pathname === '/url') {
         const target = u.searchParams.get('q') || u.searchParams.get('url');
         if (target && /^https?:/i.test(target)) { a.setAttribute('href', target); return; }
+        // A Google path (a search, the place viewer): handled like a direct link to it.
+        if (target && target.startsWith('/')) { try { u = new URL(target, u.origin); } catch { /* keep the wrapper */ } }
       }
       // Sponsored results (/aclk) and opaque result redirects (/goto) carry no destination we
       // can unwrap here; the proxy follows Google's redirect for the browser (see src/go.js).

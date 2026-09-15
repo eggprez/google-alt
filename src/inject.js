@@ -109,8 +109,8 @@ svg:not([width]):not([height]):not(.galt *):not([data-attrid="Chart"] *){max-wid
 html.galt-dark .galt-noimg{background:rgba(255,255,255,.06)}
 /* Google's dropdowns (More, Tools, time and verbatim filters) are hidden until its scripts open them.
    An open menu is moved to <body>, because the nav strip has a transform and overflow that would clip it. */
-.galt-menu-portal{opacity:1!important;position:fixed!important;z-index:2147483000;width:max-content!important;max-width:min(320px,92vw)!important;min-width:140px;
-  background:#fff;color:#1f1f1f;border-radius:8px;box-shadow:0 1px 3px rgba(60,64,67,.3),0 4px 8px 3px rgba(60,64,67,.15);overflow:hidden!important;padding:6px 0;font-family:Google Sans,Roboto,Arial,sans-serif;font-size:14px}
+.galt-menu-portal{display:block!important;opacity:1!important;position:fixed!important;z-index:2147483000;width:max-content!important;max-width:min(320px,92vw)!important;min-width:140px;
+  background:#fff;color:#1f1f1f;border-radius:8px;box-shadow:0 1px 3px rgba(60,64,67,.3),0 4px 8px 3px rgba(60,64,67,.15);overflow:auto!important;max-height:70vh;padding:6px 0;font-family:Google Sans,Roboto,Arial,sans-serif;font-size:14px}
 .galt-menu-portal a{display:block;padding:10px 16px;color:inherit;text-decoration:none;white-space:nowrap}
 .galt-menu-portal a:hover{background:rgba(60,64,67,.08)}
 .galt-menu-portal [role="button"],.galt-menu-portal [role="option"]{cursor:pointer;padding:10px 16px;white-space:nowrap}
@@ -118,9 +118,13 @@ html.galt-dark .galt-menu-portal{background:#2d2f31;color:#e3e3e3;box-shadow:0 1
 html.galt-dark .galt-menu-portal a:hover{background:rgba(255,255,255,.08)}
 /* Controls the page script drives: the location buttons, "People also ask" questions, product
    tiles, stock chart periods and collapsed sections. */
-[data-galt-geo],[data-galt-paa],[data-galt-shop],[data-galt-fin],[data-galt-toggle]{cursor:pointer}
+[data-galt-geo],[data-galt-paa],[data-galt-shop],[data-galt-fin],[data-galt-toggle],[data-galt-href],[data-galt-share],[data-galt-clamp],[data-galt-menu],[data-galt-proxy],[data-galt-lang]{cursor:pointer}
+.galt-menu-portal [data-galt-lang]{padding:8px 16px}.galt-menu-portal [data-galt-lang]:hover{background:rgba(60,64,67,.08)}
 [data-galt-geo="busy"]{opacity:.6;pointer-events:none}
-[data-galt-toggle][aria-expanded="true"] .aj35ze,[data-galt-toggle][aria-expanded="true"] .on8I6{transform:rotate(180deg)}
+/* The arrow: Google draws a section that starts open with it already turned, so those turn back when folded. */
+[data-galt-toggle]:not([data-galt-init="open"])[aria-expanded="true"] .aj35ze,[data-galt-toggle]:not([data-galt-init="open"])[aria-expanded="true"] .on8I6,
+[data-galt-toggle][data-galt-init="open"][aria-expanded="false"] .aj35ze{transform:rotate(180deg)}
+.galt-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#323232;color:#fff;padding:10px 16px;border-radius:8px;font:14px Google Sans,Roboto,Arial,sans-serif;z-index:2147483000;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 /* An opened card in a grid of cards (the financials chips sit two abreast) takes the whole row,
    as it does on google.com; its table did not fit half of one. */
 .galt-open{grid-column:1 / -1}
@@ -152,6 +156,7 @@ export const PAGE_SCRIPT = `
   // opens the panel that lives in #hdtb. A listbox combobox (the stock chart's "More" periods)
   // keeps its panel as a sibling. Open menus are moved to <body> and positioned by hand.
   function panelFor(t){
+    if (t.hasAttribute('data-galt-menu')) { var l = document.getElementById(t.getAttribute('data-galt-menu')); return l && l.parentElement; }
     if (t.id === 'hdtb-tls') return document.querySelector('#hdtb [jsname="H9P06b"]');
     if (t.getAttribute('aria-haspopup') === 'listbox') return t.parentElement && t.parentElement.querySelector(':scope > [jsname="H9P06b"]');
     var c = t.closest('[jscontroller="eBYPP"]');
@@ -169,12 +174,12 @@ export const PAGE_SCRIPT = `
     document.querySelectorAll('.galt-menu-portal').forEach(function(m){ if (chain.indexOf(m.__galtPanel) < 0) closeMenu(m.__galtPanel); });
   }
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls, [role="combobox"][aria-haspopup="listbox"]');
+    var t = e.target.closest('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls, [role="combobox"][aria-haspopup="listbox"], [data-galt-menu]');
     if (!t) { if (!e.target.closest('.galt-menu-portal')) closeMenus(); return; }
     var panel = panelFor(t); if (!panel) return;
     e.preventDefault();
     if (panel.__galtMenu) { closeMenu(panel); return; }
-    var menu = panel.querySelector(':scope > [jsname="xl07Ob"]') || panel.firstElementChild; if (!menu) return;
+    var menu = t.hasAttribute('data-galt-menu') ? document.getElementById(t.getAttribute('data-galt-menu')) : (panel.querySelector(':scope > [jsname="xl07Ob"]') || panel.firstElementChild); if (!menu) return;
     panel.__galtMenu = menu; panel.__galtTrigger = t; menu.__galtPanel = panel;
     closeMenus(panel);
     document.body.appendChild(menu); menu.classList.add('galt-menu-portal');
@@ -267,7 +272,7 @@ export const PAGE_SCRIPT = `
     e.preventDefault();
     var open = b.getAttribute('aria-expanded') !== 'true';
     b.setAttribute('aria-expanded', open ? 'true' : 'false');
-    panel.style.display = open ? 'block' : 'none';
+    panel.style.display = open ? (b.getAttribute('data-galt-init') === 'open' ? '' : 'block') : 'none';
     // The card holding the button, when it sits in a grid of such cards (the financials chips,
     // two abreast on a phone): span the row while open so the table has room.
     for (var cell = b, i = 0; cell.parentElement && i < 6; cell = cell.parentElement, i++) {
@@ -279,10 +284,268 @@ export const PAGE_SCRIPT = `
     }
   });
 
+  // Controls rewrite.js gave a destination (the map, video and event tiles, a movie's name,
+  // the Call button of a Local Services ad, ...). A link or another control inside one keeps
+  // its own behaviour: the nearest of the two wins.
+  var CONTROLS = 'a[href], button, input, textarea, select, [data-galt-href], [data-galt-geo], [data-galt-paa], [data-galt-shop], [data-galt-fin], [data-galt-toggle], [data-galt-share], [data-galt-clamp], [data-galt-menu], [data-galt-proxy], [data-galt-lang]';
+  document.addEventListener('click', function(e){
+    var t = e.target.closest(CONTROLS); if (!t || !t.hasAttribute('data-galt-href')) return;
+    e.preventDefault(); location.href = t.getAttribute('data-galt-href');
+  });
+
+  function toast(msg){
+    var d = document.createElement('div'); d.className = 'galt-toast'; d.textContent = msg;
+    document.body.appendChild(d); setTimeout(function(){ d.remove(); }, 2200);
+  }
+  // Share: the device's share sheet where there is one, else the link goes to the clipboard.
+  document.addEventListener('click', function(e){
+    var s = e.target.closest('[data-galt-share]'); if (!s) return;
+    e.preventDefault();
+    var title = s.getAttribute('data-galt-share') || document.title.replace(/ - Boogle$/, '');
+    if (navigator.share) { navigator.share({ title: title, url: location.href }).catch(function(){}); return; }
+    if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(function(){ toast('Link copied'); }, function(){ toast('Could not copy the link'); });
+  });
+
+  // "Read more" on a clamped description: lift the line clamp and the fixed height around it.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-galt-clamp]'); if (!b || e.target.closest('a[href]')) return;
+    e.preventDefault();
+    var open = b.getAttribute('data-galt-clamp') !== 'open';
+    b.setAttribute('data-galt-clamp', open ? 'open' : '1');
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    b.querySelectorAll('[style*="line-clamp"]').forEach(function(el){
+      for (var n = el; n && n !== b.parentElement; n = n.parentElement) {
+        if (open) {
+          if (n.__galtStyle == null) n.__galtStyle = n.getAttribute('style') || '';
+          n.style.removeProperty('-webkit-line-clamp'); n.style.removeProperty('height'); n.style.removeProperty('max-height');
+        } else if (n.__galtStyle != null) {
+          n.setAttribute('style', n.__galtStyle);
+        }
+      }
+    });
+  });
+
+  // A slideshow inside a card (recipe photos): its track is a flex row moved by a transform.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[role="button"][aria-label^="Next Slide"], [role="button"][aria-label^="Previous Slide"]'); if (!b) return;
+    var box = b.closest('[jscontroller="LxxjEd"]') || b.parentElement.parentElement; if (!box) return;
+    var track = Array.prototype.find.call(box.children, function(c){ return c.children.length > 1 && !c.contains(b); }); if (!track) return;
+    e.preventDefault(); e.stopPropagation();
+    var w = box.clientWidth || track.children[0].getBoundingClientRect().width, n = track.children.length;
+    var m = /matrix\(([^)]+)\)/.exec(getComputedStyle(track).transform || ''), x = m ? parseFloat(m[1].split(',')[4]) : 0;
+    var idx = Math.round(-x / w) + (/^Next/.test(b.getAttribute('aria-label')) ? 1 : -1);
+    idx = Math.max(0, Math.min(n - 1, idx));
+    track.style.transition = 'transform .25s'; track.style.transform = 'translateX(' + (-idx * w) + 'px)';
+  }, true);
+
+  // Carousel arrows (desktop): scroll the strip they belong to by most of its width.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('g-right-button, g-left-button, [role="button"][aria-label^="Next"], [role="button"][aria-label^="Previous"]');
+    if (!b || b.closest('.galt')) return;
+    var dir = (b.tagName === 'G-LEFT-BUTTON' || /Previous/.test(b.getAttribute('aria-label') || '')) ? -1 : 1;
+    for (var n = b.parentElement, i = 0; n && n !== document.body && i < 8; n = n.parentElement, i++) {
+      var strip = Array.prototype.find.call(n.querySelectorAll('div, ul, g-scrolling-carousel'), function(el){
+        return /(auto|scroll)/.test(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 8;
+      });
+      if (strip) { e.preventDefault(); strip.scrollBy({ left: dir * strip.clientWidth * 0.8, behavior: 'smooth' }); return; }
+    }
+  });
+
+  // A summary tile that follows its chip (an entity card's "Songs" list).
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-galt-proxy]'); if (!t || e.target.closest('a[href]')) return;
+    var chip = document.getElementById(t.getAttribute('data-galt-proxy')); if (!chip) return;
+    e.preventDefault(); chip.click();
+  });
+
+  function search(q){ location.href = '/search?q=' + encodeURIComponent(q); }
+
+  // Currency converter: the rate is in the page, so amounts recompute as you type; changing
+  // a currency is a new search.
+  document.querySelectorAll('[data-attrid="Converter"]').forEach(function(conv){
+    var rateEl = conv.querySelector('[data-exchange-rate]'), rate = rateEl ? parseFloat(rateEl.getAttribute('data-exchange-rate')) : 0;
+    var inputs = conv.querySelectorAll('input'), selects = conv.querySelectorAll('select');
+    var fmt = function(v){ return (Math.round(v * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }); };
+    if (rate && inputs.length >= 2) {
+      inputs[0].addEventListener('input', function(){ var v = parseFloat(inputs[0].value.replace(/,/g, '')); if (isFinite(v)) inputs[1].value = fmt(v * rate); });
+      inputs[1].addEventListener('input', function(){ var v = parseFloat(inputs[1].value.replace(/,/g, '')); if (isFinite(v)) inputs[0].value = fmt(v / rate); });
+    }
+    var label = function(sel){ var o = sel.options[sel.selectedIndex]; return o ? (o.textContent || o.value).trim() : ''; };
+    if (selects.length >= 2) selects.forEach(function(sel){ sel.addEventListener('change', function(){
+      var amt = inputs[0] ? inputs[0].value.replace(/,/g, '') : '1';
+      search((parseFloat(amt) || 1) + ' ' + label(selects[0]) + ' to ' + label(selects[1]));
+    }); });
+  });
+
+  // Unit converter: any change is a new search Google answers ("5 mile to kilometer").
+  document.querySelectorAll('[jscontroller="F66eub"]').forEach(function(w){
+    var cat = w.querySelector('[jsname="MVliGc"]'), from = w.querySelector('[jsname="De9Fne"]'), to = w.querySelector('[jsname="iNUlwe"]');
+    var vFrom = w.querySelector('[jsname="axsL6b"]'), vTo = w.querySelector('[jsname="fPLMtf"]');
+    var label = function(sel){ var o = sel && sel.options[sel.selectedIndex]; return o ? (o.textContent || o.value).trim().toLowerCase() : ''; };
+    var go = function(reverse){
+      if (!from || !to) return;
+      var v = reverse ? vTo : vFrom, n = parseFloat((v && v.value || '').replace(/,/g, ''));
+      if (!isFinite(n)) n = 1;
+      search(reverse ? n + ' ' + label(to) + ' to ' + label(from) : n + ' ' + label(from) + ' to ' + label(to));
+    };
+    if (cat) cat.addEventListener('change', function(){ search(label(cat) + ' unit converter'); });
+    if (from) from.addEventListener('change', function(){ go(false); });
+    if (to) to.addEventListener('change', function(){ go(false); });
+    [[vFrom, false], [vTo, true]].forEach(function(p){
+      if (!p[0]) return;
+      p[0].addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); go(p[1]); } });
+      p[0].addEventListener('change', function(){ go(p[1]); });
+    });
+  });
+
+  // Calculator: the keypad works locally. Expressions are parsed here (the same notation the
+  // keys write: 7×8÷2, sin(30), 5!, 2^10, 50%), Ans is the last result.
+  document.querySelectorAll('[jscontroller="GCPuBe"]').forEach(function(calc){
+    var out = calc.querySelector('[jsname="VssY5c"]') || calc.querySelector('[jsname="jhotKb"]');
+    var prev = calc.querySelector('[jsname="ubtiRc"]');
+    if (!out) return;
+    var expr = '', ans = parseFloat((out.textContent || '').replace(/[^\\d.eE+\\-]/g, '')) || 0, deg = true, inv = false, fresh = true;
+    var FN = { sin: 'sin(', cos: 'cos(', tan: 'tan(', ln: 'ln(', log: 'log(', '\\u221a': '\\u221a(' };
+    var INV = { sin: 'asin(', cos: 'acos(', tan: 'atan(', ln: 'e^(', log: '10^(', '\\u221a': '^2' };
+    function show(){ out.textContent = expr === '' ? '0' : expr; }
+    function fact(n){ if (n < 0 || n !== Math.floor(n) || n > 170) return NaN; var r = 1; for (var i = 2; i <= n; i++) r *= i; return r; }
+    function evaluate(src){
+      var s = src.replace(/\\u00d7/g, '*').replace(/\\u00f7/g, '/').replace(/\\u2212/g, '-').replace(/\\u221a/g, 'sqrt').replace(/\\u03c0/g, 'pi');
+      var toks = s.match(/\\d+\\.?\\d*(?:E[+-]?\\d+)?|\\.\\d+|asin|acos|atan|sin|cos|tan|ln|log|sqrt|Ans|pi|e|[-+*\\/^%!()]/g) || [];
+      var i = 0;
+      function peek(){ return toks[i]; }
+      function next(){ return toks[i++]; }
+      function trig(f){ return function(x){ return f(deg ? x * Math.PI / 180 : x); }; }
+      function atrig(f){ return function(x){ var r = f(x); return deg ? r * 180 / Math.PI : r; }; }
+      var F = { sin: trig(Math.sin), cos: trig(Math.cos), tan: trig(Math.tan), asin: atrig(Math.asin), acos: atrig(Math.acos), atan: atrig(Math.atan), ln: Math.log, log: Math.log10, sqrt: Math.sqrt };
+      function primary(){
+        var t = next();
+        if (t === undefined) throw 0;
+        if (t === '(') { var v = expression(); if (next() !== ')') throw 0; return v; }
+        if (t === '-') return -unary();
+        if (F[t]) { if (peek() !== '(') throw 0; return F[t](primary()); }
+        if (t === 'pi') return Math.PI;
+        if (t === 'e') return Math.E;
+        if (t === 'Ans') return ans;
+        if (/^[\\d.]/.test(t)) return parseFloat(t);
+        throw 0;
+      }
+      function postfix(){ var v = primary(); for (;;) { if (peek() === '!') { next(); v = fact(v); } else if (peek() === '%') { next(); v = v / 100; } else break; } return v; }
+      function power(){ var v = postfix(); if (peek() === '^') { next(); v = Math.pow(v, unary()); } return v; }
+      function unary(){ if (peek() === '-') { next(); return -unary(); } return power(); }
+      function term(){
+        var v = unary();
+        for (;;) {
+          if (peek() === '*') { next(); v *= unary(); }
+          else if (peek() === '/') { next(); v /= unary(); }
+          else if (peek() !== undefined && !/^[-+)]$/.test(peek()) && !/^[!%^]$/.test(peek())) v *= unary(); // 2pi, 3(4)
+          else break;
+        }
+        return v;
+      }
+      function expression(){ var v = term(); for (;;) { if (peek() === '+') { next(); v += term(); } else if (peek() === '-') { next(); v -= term(); } else break; } return v; }
+      var r = expression();
+      if (i !== toks.length) throw 0;
+      return r;
+    }
+    function fmtNum(v){ if (!isFinite(v) || isNaN(v)) return 'Error'; var a = Math.abs(v); var s = a >= 1e16 || (a < 1e-9 && a > 0) ? v.toExponential(6).replace(/\\.?0+e/, 'e') : String(Math.round(v * 1e10) / 1e10); return s; }
+    function equals(){
+      if (!expr) return;
+      var r; try { r = evaluate(expr); } catch (err) { r = NaN; }
+      if (prev) prev.textContent = expr + ' =';
+      var txt = fmtNum(r);
+      if (txt !== 'Error') ans = r;
+      expr = txt === 'Error' ? '' : txt; out.textContent = txt; fresh = true;
+    }
+    function press(label){
+      if (label === 'AC') { expr = ''; if (prev) prev.textContent = ''; show(); fresh = false; return; }
+      if (label === '=') { equals(); return; }
+      if (label === 'Deg Rad' || /radians and degrees/.test(label)) { deg = !deg; return; }
+      if (label === 'Inv') {
+        inv = !inv;
+        calc.querySelectorAll('[role="button"]').forEach(function(b){ var t = b.textContent.trim(); if (inv && FN[t]) { b.setAttribute('data-galt-was', t); b.textContent = INV[t].replace(/\\($/, '').replace('^2', 'x\\u00b2').replace('e^', 'e\\u02e3').replace('10^', '10\\u02e3'); } else if (!inv && b.hasAttribute('data-galt-was')) { b.textContent = b.getAttribute('data-galt-was'); b.removeAttribute('data-galt-was'); } });
+        return;
+      }
+      // A result on screen: an operator continues from it, a digit starts over.
+      if (fresh) { if (/^[\\d.(]$/.test(label) || FN[label] || label === '\\u03c0' || label === 'e') expr = ''; fresh = false; }
+      var was = label;
+      if (inv && FN[was]) label = INV[was]; else if (FN[was]) label = FN[was];
+      if (label === 'xy' || label === 'x\\u02b8') label = '^';
+      if (label === 'x!') label = '!';
+      if (label === 'EXP') label = 'E';
+      if (label === 'Ans') label = 'Ans';
+      if (/^(x\\u00b2)$/.test(was)) label = '^2';
+      expr += label; show();
+    }
+    calc.addEventListener('click', function(e){
+      var b = e.target.closest('[role="button"]'); if (!b || !calc.contains(b)) return;
+      var label = b.getAttribute('data-galt-was') && !inv ? b.getAttribute('data-galt-was') : b.textContent.replace(/\\s+/g, ' ').trim();
+      if (!label && /degrees/.test(b.getAttribute('aria-label') || '')) label = 'Deg Rad';
+      if (b.getAttribute('aria-label') === 'switch between radians and degrees') label = 'Deg Rad';
+      if (/toggle scientific/.test(b.getAttribute('aria-label') || '')) return;
+      if (/calculations history/.test(b.getAttribute('aria-label') || '')) return;
+      e.preventDefault(); press(label);
+    });
+    var KEYS = { '*': '\\u00d7', '/': '\\u00f7', '-': '\\u2212', 'x': '\\u00d7' };
+    document.addEventListener('keydown', function(e){
+      if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var k = e.key;
+      if (k === 'Enter' || k === '=') { e.preventDefault(); equals(); return; }
+      if (k === 'Escape') { press('AC'); return; }
+      if (k === 'Backspace') { if (fresh) { expr = ''; fresh = false; } else expr = expr.slice(0, -1); show(); return; }
+      if (/^[\\d.+()%^!]$/.test(k)) { e.preventDefault(); press(k); return; }
+      if (KEYS[k]) { e.preventDefault(); press(KEYS[k]); }
+    });
+    show();
+  });
+
+  // Translate: a pick from a language list, Enter in the text box and the swap arrow are new
+  // searches; the speaker buttons read the text aloud; copy copies.
+  (function(){
+    var ta = document.getElementById('tw-source-text-ta'), sl = document.getElementById('tw-sl'), tl = document.getElementById('tw-tl');
+    if (!ta || !sl || !tl) return;
+    var name = function(btn){ return (btn.textContent || '').replace(/\\s*-\\s*detected/i, '').replace(/\\s+/g, ' ').trim(); };
+    var go = function(text, from, to){
+      text = (text || '').trim(); if (!text || !to) return;
+      var q = 'translate ' + text + (from && !/^(detect|auto)/i.test(from) ? ' from ' + from : '') + ' to ' + to;
+      search(q);
+    };
+    var tgt = function(){ var p = document.getElementById('tw-target-text'); return p ? (p.innerText || p.textContent).trim() : ''; };
+    ta.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(ta.value, name(sl), name(tl)); } });
+    var swap = document.getElementById('tw-swap');
+    if (swap) swap.addEventListener('click', function(){ go(tgt(), name(tl), name(sl)); });
+    document.addEventListener('click', function(e){
+      var it = e.target.closest('[data-galt-lang]'); if (!it) return;
+      e.preventDefault();
+      var picked = it.textContent.replace(/\\s+/g, ' ').trim();
+      if (it.getAttribute('data-galt-lang') === 'sl') go(ta.value, picked, name(tl)); else go(ta.value, name(sl), picked);
+    });
+    function speak(text, lang){
+      if (!window.speechSynthesis || !text) { toast('Speech is not available in this browser'); return; }
+      var u = new SpeechSynthesisUtterance(text); if (lang) u.lang = lang;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    }
+    var src = document.getElementById('tw-src-spkr-button');
+    if (src) src.addEventListener('click', function(){ speak(ta.value, ta.getAttribute('lang') || sl.getAttribute('data-dslc') || ''); });
+    document.querySelectorAll('[id^="tw-spkr"][id$="-button"]').forEach(function(b){
+      var pre = document.getElementById(b.id.replace(/^tw-spkr/, 'tw-target-text').replace(/-button$/, ''));
+      b.addEventListener('click', function(){ speak(pre ? (pre.innerText || pre.textContent).trim() : tgt(), tl.getAttribute('data-lang') || ''); });
+    });
+    document.querySelectorAll('[id="tw-cpy-btn"]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var menu = b.closest('[id="tw-tmenu"]'), holder = menu && menu.parentElement;
+        var pre = holder && holder.querySelector('pre[id^="tw-target-text"]');
+        var text = pre ? (pre.innerText || pre.textContent).trim() : tgt();
+        if (navigator.clipboard && text) navigator.clipboard.writeText(text).then(function(){ toast('Copied'); }, function(){ toast('Could not copy'); });
+      });
+    });
+  })();
+
   // Enter and Space activate those controls the way they would a button.
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    var el = e.target.closest && e.target.closest('[data-galt-fin], [data-galt-toggle], [data-galt-paa], [data-galt-geo="use"]'); if (!el) return;
+    var el = e.target.closest && e.target.closest('[data-galt-fin], [data-galt-toggle], [data-galt-paa], [data-galt-geo="use"], [data-galt-href], [data-galt-share], [data-galt-clamp], [data-galt-menu], [data-galt-proxy], [data-galt-lang]'); if (!el) return;
     e.preventDefault(); el.click();
   });
 })();
