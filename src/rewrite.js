@@ -413,65 +413,13 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
     }
   });
 
-  // Branding: Google's wordmark becomes Boogle, linking to the proxy's home page.
-  // The mark to replace differs per page: desktop has #logo holding a 92x30 inline SVG, the mobile
-  // SERP an <a aria-label="Google"> around a 92x36 one (matched by neither of the old selectors,
-  // which is why the phone still showed Google's own logo), and both keep a small square "G" for
-  // the collapsed header. A wordmark squeezed into a 32x32 box is unreadable, so square marks get
-  // a monogram, and every mark is drawn at the size of the one it replaces so nothing reflows.
-  const FONT = "'Google Sans','Product Sans',Poppins,'Trebuchet MS',Arial,sans-serif";
-  let logoSeq = 0;
-  function boogleSvg(w, h) {
-    const id = 'galt-logo-grad-' + (++logoSeq);
-    const grad = '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="0.6">'
-      + '<stop offset="0" stop-color="#5b21b6"/><stop offset="0.55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
-    const square = w / h < 1.6;
-    const mark = square
-      ? '<circle cx="17" cy="17" r="16.5" fill="url(#' + id + ')"/>'
-        + '<text x="17" y="25.5" text-anchor="middle" font-family="' + FONT + '" font-size="23" font-weight="700" fill="#fff">B</text>'
-      : '<text x="1" y="27" textLength="109" lengthAdjust="spacingAndGlyphs" font-family="' + FONT + '"'
-        + ' font-size="32" font-weight="700" letter-spacing="-1.5" fill="url(#' + id + ')">Boogle</text>';
-    return '<svg class="galt-logo" xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"'
-      + ' viewBox="' + (square ? '0 0 34 34' : '0 0 112 34') + '" preserveAspectRatio="xMidYMid meet"'
-      + ' role="img" aria-label="Boogle">' + grad + mark + '</svg>';
-  }
-  // The size Google drew its mark at. A logo in a header that is hidden until you scroll measures
-  // 0x0, so fall back to the width/height attributes before the wordmark's own default.
-  function markSize(el) {
-    const kid = el.querySelector('svg, img') || el;
-    const r = kid.getBoundingClientRect();
-    let w = Math.round(r.width);
-    let h = Math.round(r.height);
-    if (!w || !h) {
-      w = parseFloat(kid.getAttribute('width')) || 0;
-      h = parseFloat(kid.getAttribute('height')) || 0;
-    }
-    if (!w || !h) { w = 112; h = 34; }
-    return { w, h };
-  }
-  function brand(el) {
-    if (el.querySelector('.galt-logo')) return;
-    const size = markSize(el);
-    el.innerHTML = boogleSvg(size.w, size.h);
-    el.setAttribute('aria-label', 'Boogle home');
-    el.classList.add('galt-logo-link');
-    if (el.tagName === 'A') {
-      el.setAttribute('href', proxyOrigin + '/');
-      el.setAttribute('title', 'Boogle home');
-    }
-  }
-  // Exact labels only: "Google apps" (the app grid) also contains the word.
+  // Google's own wordmark stays. Its link would otherwise lead to google.com, so point it at the
+  // proxy's home page. Exact labels only: "Google apps" (the app grid) also contains the word.
   document.querySelectorAll('#logo, a[aria-label="Google" i], a[aria-label="Go to Google Home" i], a[title="Go to Google Home" i]')
-    .forEach(brand);
-  document.querySelectorAll('img[alt="Google"]').forEach((img) => {
-    const a = img.closest('a');
-    if (a && a.querySelector('.galt-logo')) return;
-    const size = markSize(img);
-    const span = document.createElement('span');
-    span.innerHTML = boogleSvg(size.w, size.h);
-    img.replaceWith(span.firstElementChild);
-    if (a) { a.setAttribute('href', proxyOrigin + '/'); a.classList.add('galt-logo-link'); }
-  });
+    .forEach((el) => {
+      const a = el.tagName === 'A' ? el : el.closest('a');
+      if (a) a.setAttribute('href', proxyOrigin + '/');
+    });
   document.title = document.title.replace(/\s*-\s*Google (?:Search|Shopping)\s*$/i, ' - Boogle');
 
   // Google picks light or dark on the server, from the account setting — it ignores the viewer's

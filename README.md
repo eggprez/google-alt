@@ -4,7 +4,7 @@ Google search results, minus Google's AI Overview, plus a Claude Code overview i
 
 A Docker container runs a real Chromium signed into your Google account. When you search through
 `search.bindel.glass`, the container loads Google's results page, removes Google's AI Overview block,
-and serves you the page with Google's wordmark swapped for a purple **Boogle**. The overview slot
+and serves you the page with a Claude overview in its place. The overview slot
 streams in an answer from headless Claude Code as it is written: first a quick draft from the top
 results on the page, then a verification pass with Claude's own web search that corrects and flags
 anything wrong. Everything else on the page is Google as normal, and result links go straight to the
@@ -15,8 +15,8 @@ page is rewritten to come back through the proxy, so switching to Images and bac
 onto google.com (which is what used to make Google's own AI Overview reappear). Only the web tab
 gets a Claude overview; the others are Google's page as normal.
 
-The page keeps Google's own look. The only thing that changes visually is the wordmark (a purple
-**Boogle**), the page title, and the overview block itself.
+The page keeps Google's own look, logo included. The only things that change visually are the page
+title and the overview block itself.
 
 ## How it works
 
@@ -39,7 +39,7 @@ User-Agent (so Google sends mobile markup to phones) and, when the phone has sha
 a `uule` parameter carrying the coordinates, then rewrites the DOM in place: Google's
 overview band (found by its container, so the "Thinking" skeleton counts too) is removed and our
 block is inserted at the top of the results column, scripts are stripped, URLs absolutized,
-tracking pings removed, every Google search link pointed back at the proxy, the logo replaced, and
+tracking pings removed, every Google search link pointed back at the proxy, and
 the top organic results (title, address, snippet) captured for the overview. A small page script restores
 what Google's scripts used to do: Enter submits the search box, and the More / Tools / time-range
 menus open. Queries where Google showed no overview get no Claude overview either.

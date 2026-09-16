@@ -100,9 +100,6 @@ html.galt-dark .galt-fix{color:#fbbf24}
 /* The stock chart's SVGs are sized by Google's CSS from their container and have no width attribute
    either; clamping those drew the chart as a 24px squiggle. */
 svg:not([width]):not([height]):not(.galt *):not([data-attrid="Chart"] *){max-width:24px;max-height:24px}
-/* Boogle wordmark */
-.galt-logo-link{display:inline-flex;align-items:center;text-decoration:none}
-.galt-logo{display:block;max-width:none;max-height:none}
 /* A lazy image whose URL only ever arrives by XHR. Keeping the box holds the card's shape; this
    makes the gap read as a picture that did not load rather than as a hole in the layout. */
 .galt-noimg{background:rgba(128,128,128,.12);border-radius:8px}
