@@ -3,7 +3,11 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 export const PAGE_CSS = `
 .galt{--galt-bg:#f3f6fc;--galt-fg:#1f1f1f;--galt-muted:#5f6368;--galt-line:#dfe3ea;--galt-accent:#0b57d0;--galt-chip:#e8f0fe;--galt-purple:#7c3aed;
   box-sizing:border-box;margin:0 0 24px;padding:16px 18px;border-radius:20px;background:var(--galt-bg);color:var(--galt-fg);
-  font-family:Google Sans,Roboto,Arial,sans-serif;font-size:15px;line-height:1.5;max-width:100%;overflow-wrap:anywhere}
+  font-family:Google Sans,Roboto,Arial,sans-serif;font-size:15px;line-height:1.5;max-width:100%;overflow-wrap:anywhere;
+  /* On a business page Google's overview sits in a two-column grid (2 x 184px on a phone). Left
+     to auto-placement the card took one column, and its one unbreakable line (the status) then
+     stretched that column past the screen. Span the row, and never size it from the content. */
+  grid-column:1 / -1;min-width:0}
 /* Dark is decided by the page Google served (html.galt-dark, set in rewrite.js), never by the
    viewer's prefers-color-scheme: Google ignores that, so following it would put a light card on a
    dark page or the reverse. Colours match Google's own dark SERP. */

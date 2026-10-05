@@ -255,7 +255,8 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   const markToggle = (btn, panel) => {
     if (!panel || panel.id === 'hdtbMenus' || btn.hasAttribute('data-galt-paa')) return;
     if (btn.matches('[jscontroller="eBYPP"] [jsname="oYxtQd"], #hdtb-tls')) return;
-    if (panel.querySelector('[role="progressbar"]') || !(panel.textContent || '').trim()) {
+    // A panel of pictures alone (a restaurant's "View the menu" photos) is content too.
+    if (panel.querySelector('[role="progressbar"]') || (!(panel.textContent || '').trim() && !panel.querySelector('img'))) {
       // A knowledge panel row whose content Google fetches on tap ("Tickets", "Popular times",
       // "Reviews" under a landmark): nothing to unfold, so tap searches for it, like a PAA.
       const t = text1(btn.querySelector('[jsname="r4nke"]'));
@@ -363,8 +364,11 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   for (const id of Object.keys(ldi)) {
     const url = ldi[id];
     if (typeof url !== 'string' || !url) continue;
-    // Google reuses an id across the copies of a card, so fill every element carrying it.
-    for (const img of document.querySelectorAll('[id="' + id.replace(/["\\]/g, '\\$&') + '"]')) {
+    // Google reuses an id across the copies of a card, so fill every element carrying it. Some
+    // keys are not element ids but the image's data-iid (the first photos of a restaurant's
+    // "View the menu" strip), which is how _setImagesSrc looks them up too.
+    const key = id.replace(/["\\]/g, '\\$&');
+    for (const img of document.querySelectorAll('[id="' + key + '"], img[data-iid="' + key + '"]')) {
       if (img.tagName !== 'IMG') continue;
       // Only fill in placeholders; never overwrite a picture Google already loaded.
       const cur = img.getAttribute('src') || '';
@@ -695,6 +699,12 @@ export function rewriteInPage({ proxyOrigin, placeholderId }) {
   // The photo strip and "View all photos" in a place's panel opened Google's photo viewer.
   document.querySelectorAll('[role="button"][aria-label="View all photos"], g-scrolling-carousel button[data-phdesc]').forEach((b) => {
     if (q0 && !hasLink(b)) setHref(b, searchHref(q0, '&udm=2'));
+  });
+  // A photo in a strip of them (a restaurant's menu pages) opened Google's viewer: open the
+  // picture itself at a readable size. The size is the "=w224-h224-n-k-no" tail of its URL.
+  document.querySelectorAll('a[roledescription="slide"]:not([href])').forEach((a) => {
+    const src = (a.querySelector('img') || a).getAttribute('src') || '';
+    if (/^https:\/\/[a-z0-9-]+\.googleusercontent\.com\//i.test(src) && !a.closest('[data-galt-href]')) setHref(a, src.replace(/=[\w-]+$/, '') + '=s1600');
   });
   // The panel's hours line opened the week's hours, which are not in the page.
   document.querySelectorAll('[jscontroller="EQHD1"] [role="button"]').forEach((b) => {
