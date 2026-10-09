@@ -8,7 +8,7 @@ RUN apt-get update \
  && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # Claude Code CLI. Log in interactively with `docker exec -it google-alt claude`, or set CLAUDE_CODE_OAUTH_TOKEN.
-ARG CLAUDE_CODE_VERSION=2.1.265
+ARG CLAUDE_CODE_VERSION=2.1.295
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && claude --version
 
 WORKDIR /app
